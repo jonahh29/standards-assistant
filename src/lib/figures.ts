@@ -6,7 +6,7 @@ import {
   renderPageAsImage,
 } from "unpdf";
 
-type PDFDocumentProxy = Awaited<ReturnType<typeof getDocumentProxy>>;
+export type PDFDocumentProxy = Awaited<ReturnType<typeof getDocumentProxy>>;
 
 export interface ExtractedFigure {
   pageNumber: number;
@@ -14,6 +14,11 @@ export interface ExtractedFigure {
   width: number;
   height: number;
   png: Buffer;
+}
+
+export interface PageLabels {
+  page: number;
+  labels: string[];
 }
 
 const MIN_DIMENSION = 100;
@@ -33,57 +38,59 @@ export function ensurePdfjsModule() {
   return pdfjsModuleReady;
 }
 
-function detectLabels(pageText: string): string[] {
-  return [...pageText.matchAll(LABEL_PATTERN)].map((m) => m[1]);
+/** Pure text-based caption detection — no rendering. Returns only pages that have at least one "Figure X.Y:" / "Table X.Y:" caption. */
+export function detectPageLabels(pages: string[]): PageLabels[] {
+  const result: PageLabels[] = [];
+  for (let pageNumber = 1; pageNumber <= pages.length; pageNumber++) {
+    const labels = [...(pages[pageNumber - 1] ?? "").matchAll(LABEL_PATTERN)].map(
+      (m) => m[1]
+    );
+    if (labels.length > 0) result.push({ page: pageNumber, labels });
+  }
+  return result;
 }
 
-/**
- * Extracts figures from every page: pages whose text mentions a "Figure X.Y" or
- * "Table X.Y" are rendered whole (captures vector-drawn diagrams, which is how most
- * technical Standards diagrams are actually drawn — not embedded photos). Pages
- * without such a caption still get any embedded raster images pulled out directly
- * (covers scanned/photo content).
- */
-export async function extractFigures(
+/** Pulls embedded raster images off a single (uncaptioned) page — cheap, no page rendering. */
+export async function extractRasterImages(
   pdf: PDFDocumentProxy,
-  pages: string[]
+  pageNumber: number
 ): Promise<ExtractedFigure[]> {
   const figures: ExtractedFigure[] = [];
+  const images = await extractImages(pdf, pageNumber);
 
-  for (let pageNumber = 1; pageNumber <= pages.length; pageNumber++) {
-    const labels = detectLabels(pages[pageNumber - 1] ?? "");
+  for (const image of images) {
+    if (image.width < MIN_DIMENSION || image.height < MIN_DIMENSION) continue;
 
-    if (labels.length > 0) {
-      const rendered = await renderPageAsImage(pdf, pageNumber, {
-        canvasImport: () => import("@napi-rs/canvas"),
-        scale: RENDER_SCALE,
-      });
-      const png = Buffer.from(rendered as ArrayBuffer);
-      const metadata = await sharp(png).metadata();
+    const png = await sharp(image.data, {
+      raw: { width: image.width, height: image.height, channels: image.channels },
+    })
+      .png()
+      .toBuffer();
 
-      figures.push({
-        pageNumber,
-        label: labels.join(", "),
-        width: metadata.width ?? 0,
-        height: metadata.height ?? 0,
-        png,
-      });
-      continue;
-    }
-
-    const images = await extractImages(pdf, pageNumber);
-    for (const image of images) {
-      if (image.width < MIN_DIMENSION || image.height < MIN_DIMENSION) continue;
-
-      const png = await sharp(image.data, {
-        raw: { width: image.width, height: image.height, channels: image.channels },
-      })
-        .png()
-        .toBuffer();
-
-      figures.push({ pageNumber, label: null, width: image.width, height: image.height, png });
-    }
+    figures.push({ pageNumber, label: null, width: image.width, height: image.height, png });
   }
 
   return figures;
+}
+
+/** Renders a whole captioned page to a PNG (captures vector-drawn diagrams, which is how most technical Standards figures are actually drawn). */
+export async function renderFigurePage(
+  pdf: PDFDocumentProxy,
+  pageNumber: number,
+  labels: string[]
+): Promise<ExtractedFigure> {
+  const rendered = await renderPageAsImage(pdf, pageNumber, {
+    canvasImport: () => import("@napi-rs/canvas"),
+    scale: RENDER_SCALE,
+  });
+  const png = Buffer.from(rendered as ArrayBuffer);
+  const metadata = await sharp(png).metadata();
+
+  return {
+    pageNumber,
+    label: labels.join(", "),
+    width: metadata.width ?? 0,
+    height: metadata.height ?? 0,
+    png,
+  };
 }

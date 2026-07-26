@@ -2,7 +2,7 @@ import { getDocumentProxy, extractText } from "unpdf";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { chunkPages } from "@/lib/chunk";
 import { embedTexts } from "@/lib/voyage";
-import { extractFigures, ensurePdfjsModule } from "@/lib/figures";
+import { detectPageLabels, extractRasterImages, ensurePdfjsModule } from "@/lib/figures";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -76,38 +76,58 @@ export async function POST(request: Request) {
       if (chunkError) throw new Error(chunkError.message);
     }
 
-    const figures = await extractFigures(pdf, pages);
+    // Pages with a detected caption get deferred to the resumable figures-batch
+    // route (whole-page rendering is too slow to fit in this request for
+    // figure-dense documents). Uncaptioned pages still get their embedded
+    // raster images pulled inline here — that path is cheap.
+    const pageLabels = detectPageLabels(pages);
+    const captionedPages = new Set(pageLabels.map((p) => p.page));
 
-    for (let i = 0; i < figures.length; i++) {
-      const figure = figures[i];
-      const figurePath = `${document.id}/${figure.pageNumber}-${i}.png`;
+    for (let pageNumber = 1; pageNumber <= pages.length; pageNumber++) {
+      if (captionedPages.has(pageNumber)) continue;
 
-      const { error: figureUploadError } = await supabase.storage
-        .from("standards-figures")
-        .upload(figurePath, figure.png, { contentType: "image/png" });
+      const rasterFigures = await extractRasterImages(pdf, pageNumber);
+      for (let i = 0; i < rasterFigures.length; i++) {
+        const figure = rasterFigures[i];
+        const figurePath = `${document.id}/${figure.pageNumber}-${i}.png`;
 
-      if (figureUploadError) throw new Error(figureUploadError.message);
+        const { error: figureUploadError } = await supabase.storage
+          .from("standards-figures")
+          .upload(figurePath, figure.png, { contentType: "image/png" });
 
-      const { error: figureInsertError } = await supabase
-        .from("document_figures")
-        .insert({
-          document_id: document.id,
-          page_number: figure.pageNumber,
-          storage_path: figurePath,
-          label: figure.label,
-          width: figure.width,
-          height: figure.height,
-        });
+        if (figureUploadError) throw new Error(figureUploadError.message);
 
-      if (figureInsertError) throw new Error(figureInsertError.message);
+        const { error: figureInsertError } = await supabase
+          .from("document_figures")
+          .insert({
+            document_id: document.id,
+            page_number: figure.pageNumber,
+            storage_path: figurePath,
+            label: figure.label,
+            width: figure.width,
+            height: figure.height,
+          });
+
+        if (figureInsertError) throw new Error(figureInsertError.message);
+      }
     }
 
     await supabase
       .from("documents")
-      .update({ status: "ready" })
+      .update({
+        status: "ready",
+        figure_queue: pageLabels,
+        figures_total: pageLabels.length,
+        figures_done: 0,
+        figures_status: pageLabels.length > 0 ? "processing" : "done",
+      })
       .eq("id", document.id);
 
-    return Response.json({ id: document.id, status: "ready" });
+    return Response.json({
+      id: document.id,
+      status: "ready",
+      figuresPending: pageLabels.length > 0,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Processing failed.";
     await supabase

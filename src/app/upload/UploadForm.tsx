@@ -2,42 +2,67 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 export function UploadForm() {
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const [status, setStatus] = useState<"idle" | "uploading" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "uploading" | "processing" | "error">(
+    "idle"
+  );
   const [errorMessage, setErrorMessage] = useState("");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!file || !title) return;
 
-    setStatus("uploading");
     setErrorMessage("");
 
-    const formData = new FormData();
-    formData.append("title", title);
-    formData.append("file", file);
+    try {
+      setStatus("uploading");
 
-    const res = await fetch("/api/documents/upload", {
-      method: "POST",
-      body: formData,
-    });
-    const json = await res.json();
+      const urlRes = await fetch("/api/documents/upload-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: file.name }),
+      });
+      const urlJson = await urlRes.json();
+      if (!urlRes.ok) throw new Error(urlJson.error ?? "Could not start upload.");
 
-    if (!res.ok) {
+      const supabase = getSupabaseBrowserClient();
+      const { error: uploadError } = await supabase.storage
+        .from("standards-pdfs")
+        .uploadToSignedUrl(urlJson.storagePath, urlJson.token, file, {
+          contentType: "application/pdf",
+        });
+      if (uploadError) throw new Error(uploadError.message);
+
+      setStatus("processing");
+
+      const processRes = await fetch("/api/documents/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          filename: file.name,
+          storagePath: urlJson.storagePath,
+        }),
+      });
+      const processJson = await processRes.json();
+      if (!processRes.ok) throw new Error(processJson.error ?? "Processing failed.");
+
+      setStatus("idle");
+      setTitle("");
+      setFile(null);
+      router.refresh();
+    } catch (err) {
       setStatus("error");
-      setErrorMessage(json.error ?? "Upload failed.");
-      return;
+      setErrorMessage(err instanceof Error ? err.message : "Upload failed.");
     }
-
-    setStatus("idle");
-    setTitle("");
-    setFile(null);
-    router.refresh();
   }
+
+  const busy = status === "uploading" || status === "processing";
 
   return (
     <form
@@ -67,10 +92,12 @@ export function UploadForm() {
       </label>
       <button
         type="submit"
-        disabled={status === "uploading"}
+        disabled={busy}
         className="rounded bg-cyan px-4 py-2 font-medium text-navy disabled:opacity-50"
       >
-        {status === "uploading" ? "Uploading & processing..." : "Upload"}
+        {status === "uploading" && "Uploading file..."}
+        {status === "processing" && "Extracting & embedding text..."}
+        {(status === "idle" || status === "error") && "Upload"}
       </button>
       {status === "error" && (
         <p className="font-mono text-sm text-amber">Error — {errorMessage}</p>

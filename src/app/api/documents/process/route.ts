@@ -9,34 +9,22 @@ export const maxDuration = 300;
 const EMBED_BATCH_SIZE = 20;
 
 export async function POST(request: Request) {
-  const supabase = getSupabaseServerClient();
-  const formData = await request.formData();
-  const file = formData.get("file") as File | null;
-  const title = (formData.get("title") as string | null)?.trim();
+  const { title, filename, storagePath } = await request.json();
 
-  if (!file || !title) {
+  if (!title || !filename || !storagePath) {
     return Response.json(
-      { error: "Both a title and a PDF file are required." },
+      { error: "title, filename, and storagePath are required." },
       { status: 400 }
     );
   }
 
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const storagePath = `${Date.now()}-${file.name}`;
-
-  const { error: uploadError } = await supabase.storage
-    .from("standards-pdfs")
-    .upload(storagePath, bytes, { contentType: "application/pdf" });
-
-  if (uploadError) {
-    return Response.json({ error: uploadError.message }, { status: 500 });
-  }
+  const supabase = getSupabaseServerClient();
 
   const { data: document, error: insertError } = await supabase
     .from("documents")
     .insert({
       title,
-      filename: file.name,
+      filename,
       storage_path: storagePath,
       status: "processing",
     })
@@ -51,6 +39,15 @@ export async function POST(request: Request) {
   }
 
   try {
+    const { data: fileBlob, error: downloadError } = await supabase.storage
+      .from("standards-pdfs")
+      .download(storagePath);
+
+    if (downloadError || !fileBlob) {
+      throw new Error(downloadError?.message ?? "Could not download uploaded file.");
+    }
+
+    const bytes = new Uint8Array(await fileBlob.arrayBuffer());
     const pdf = await getDocumentProxy(bytes);
     const { text } = await extractText(pdf, { mergePages: false });
     const pages = Array.isArray(text) ? text : [text];

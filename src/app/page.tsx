@@ -5,19 +5,21 @@ export default async function Home() {
   const { error } = await supabase.storage.listBuckets();
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-zinc-50 font-sans dark:bg-black">
-      <h1 className="text-3xl font-semibold text-black dark:text-zinc-50">
+    <div className="flex flex-1 flex-col items-center justify-center gap-4">
+      <h1 className="font-heading text-3xl font-semibold">
         Standards Assistant
       </h1>
-      <p className="text-lg text-zinc-600 dark:text-zinc-400">Hello world 🎉</p>
-      <p className="text-base">
+      <p className="text-lg text-offwhite/70">
+        Cited answers from your Australian Standards documents.
+      </p>
+      <p className="font-mono text-sm">
         Supabase connection:{" "}
         {error ? (
-          <span className="font-medium text-red-600">
+          <span className="font-medium text-amber">
             Error — {error.message}
           </span>
         ) : (
-          <span className="font-medium text-green-600">Connected ✓</span>
+          <span className="font-medium text-cyan">Connected ✓</span>
         )}
       </p>
     </div>

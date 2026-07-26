@@ -37,7 +37,9 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-navy text-offwhite font-body">
         <nav className="flex items-center gap-6 border-b border-cyan/20 px-6 py-4 font-heading">
-          <span className="text-lg font-medium tracking-tight">
+          <span className="flex items-center gap-2 text-lg font-medium tracking-tight">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo-icon.svg" alt="ResiDraft" className="h-7 w-auto" />
             Standards Assistant
           </span>
           <Link href="/" className="text-sm text-offwhite/80 hover:text-cyan">

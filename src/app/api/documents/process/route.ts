@@ -2,7 +2,7 @@ import { getDocumentProxy, extractText } from "unpdf";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { chunkPages } from "@/lib/chunk";
 import { embedTexts } from "@/lib/voyage";
-import { extractFigures } from "@/lib/figures";
+import { extractFigures, ensurePdfjsModule } from "@/lib/figures";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -47,6 +47,8 @@ export async function POST(request: Request) {
     if (downloadError || !fileBlob) {
       throw new Error(downloadError?.message ?? "Could not download uploaded file.");
     }
+
+    await ensurePdfjsModule();
 
     const bytes = new Uint8Array(await fileBlob.arrayBuffer());
     const pdf = await getDocumentProxy(bytes);

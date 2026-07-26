@@ -1,6 +1,7 @@
 export interface Chunk {
   content: string;
   pageNumber: number;
+  pageEnd: number;
   clauseLabel: string | null;
 }
 
@@ -31,7 +32,7 @@ function chunkFallback(pageText: string, pageNumber: number): Chunk[] {
   let buffer = "";
   const flush = () => {
     if (!buffer.trim()) return;
-    chunks.push({ content: buffer.trim(), pageNumber, clauseLabel: null });
+    chunks.push({ content: buffer.trim(), pageNumber, pageEnd: pageNumber, clauseLabel: null });
     buffer = "";
   };
 
@@ -50,17 +51,30 @@ function chunkFallback(pageText: string, pageNumber: number): Chunk[] {
  * the next header, so a clause is retrieved as one coherent unit instead of an
  * arbitrary character-count fragment. Content before the first header anywhere in the
  * document (front matter/TOC) falls back to simple per-page paragraph chunking.
+ *
+ * A chunk records both its starting page (`pageNumber`, used for citations — where the
+ * clause begins) and the last page its content actually reached (`pageEnd`) — a clause's
+ * text commonly spans onto the page containing its figure, so figures need to be matched
+ * against this whole range, not just the starting page.
  */
 export function chunkDocument(pages: string[]): Chunk[] {
   const chunks: Chunk[] = [];
   let sawFirstHeader = false;
   let currentLabel: string | null = null;
-  let currentPage = 1;
+  let currentPageStart = 1;
+  let currentPageEnd = 1;
   let buffer: string[] = [];
 
   const flush = () => {
     const content = buffer.join("\n").trim();
-    if (content) chunks.push({ content, pageNumber: currentPage, clauseLabel: currentLabel });
+    if (content) {
+      chunks.push({
+        content,
+        pageNumber: currentPageStart,
+        pageEnd: currentPageEnd,
+        clauseLabel: currentLabel,
+      });
+    }
     buffer = [];
   };
 
@@ -79,9 +93,10 @@ export function chunkDocument(pages: string[]): Chunk[] {
         flush();
         sawFirstHeader = true;
         currentLabel = label;
-        currentPage = pageNumber;
+        currentPageStart = pageNumber;
       }
       buffer.push(line);
+      currentPageEnd = pageNumber;
 
       if (buffer.join("\n").length > MAX_CLAUSE_CHUNK_SIZE) flush();
     }

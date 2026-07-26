@@ -64,6 +64,7 @@ export async function POST(request: Request) {
         document_id: document.id,
         chunk_index: i + j,
         page_number: chunk.pageNumber,
+        page_end: chunk.pageEnd,
         clause_label: chunk.clauseLabel,
         content: chunk.content,
         embedding: embeddings[j],

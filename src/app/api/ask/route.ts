@@ -14,6 +14,7 @@ interface MatchRow {
   document_id: string;
   content: string;
   page_number: number | null;
+  page_end: number | null;
   clause_label: string | null;
 }
 
@@ -53,7 +54,7 @@ export async function POST(request: Request) {
   if (clauseNumbers.length > 0) {
     let query = supabase
       .from("document_chunks")
-      .select("id, document_id, content, page_number, clause_label")
+      .select("id, document_id, content, page_number, page_end, clause_label")
       .or(clauseNumbers.map((c) => `clause_label.ilike.${c}%`).join(","));
     if (filterIds) query = query.in("document_id", filterIds);
     const { data } = await query;
@@ -106,8 +107,14 @@ export async function POST(request: Request) {
 
   const citations = await Promise.all(
     matches.map(async (m, i) => {
-      const key = `${m.document_id}:${m.page_number}`;
-      const pageFigures = figuresByPage.get(key) ?? [];
+      // A clause's text commonly spans onto the page containing its figure, so match
+      // figures against the chunk's whole page range, not just its starting page.
+      const start = m.page_number ?? 0;
+      const end = m.page_end ?? start;
+      const pageFigures = [];
+      for (let p = start; p <= end; p++) {
+        pageFigures.push(...(figuresByPage.get(`${m.document_id}:${p}`) ?? []));
+      }
 
       const figures = await Promise.all(
         pageFigures.map(async (fig) => {
@@ -121,6 +128,7 @@ export async function POST(request: Request) {
       return {
         documentTitle: retrieved[i].documentTitle,
         pageNumber: m.page_number,
+        pageEnd: m.page_end,
         clauseLabel: m.clause_label,
         figures: figures.filter((f) => f.url),
       };

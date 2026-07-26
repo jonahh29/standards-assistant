@@ -12,6 +12,7 @@ interface Figure {
 interface Citation {
   documentTitle: string;
   pageNumber: number | null;
+  pageEnd: number | null;
   clauseLabel: string | null;
   figures: Figure[];
 }

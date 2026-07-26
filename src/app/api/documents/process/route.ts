@@ -1,6 +1,6 @@
 import { getDocumentProxy, extractText } from "unpdf";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
-import { chunkPages } from "@/lib/chunk";
+import { chunkDocument } from "@/lib/chunk";
 import { embedTexts } from "@/lib/voyage";
 import { detectPageLabels, extractRasterImages, ensurePdfjsModule } from "@/lib/figures";
 
@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     const pdf = await getDocumentProxy(bytes);
     const { text } = await extractText(pdf, { mergePages: false });
     const pages = Array.isArray(text) ? text : [text];
-    const chunks = chunkPages(pages);
+    const chunks = chunkDocument(pages);
 
     for (let i = 0; i < chunks.length; i += EMBED_BATCH_SIZE) {
       const batch = chunks.slice(i, i + EMBED_BATCH_SIZE);

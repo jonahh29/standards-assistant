@@ -1,7 +1,7 @@
-import Link from "next/link";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { UploadForm } from "./UploadForm";
 import { FiguresProgress } from "./FiguresProgress";
+import { DocumentActions } from "./DocumentActions";
 
 export const dynamic = "force-dynamic";
 
@@ -30,9 +30,7 @@ export default async function UploadPage() {
                 key={doc.id}
                 className="flex items-center justify-between rounded border border-cyan/20 px-4 py-2"
               >
-                <Link href={`/documents/${doc.id}`} className="hover:text-cyan">
-                  {doc.title}
-                </Link>
+                <DocumentActions documentId={doc.id} title={doc.title} />
                 <div className="flex items-center gap-3">
                   {doc.status === "ready" && (
                     <FiguresProgress

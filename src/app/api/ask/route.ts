@@ -5,35 +5,77 @@ import { askWithCitations, type RetrievedChunk } from "@/lib/anthropic";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const MATCH_COUNT = 8;
+const CHUNKS_PER_DOCUMENT = 4;
+const MAX_DOCUMENTS = 6;
+const CLAUSE_PATTERN = /\b\d{1,2}(?:\.\d{1,3}){1,4}[a-z]?\b/g;
+
+interface MatchRow {
+  id: string;
+  document_id: string;
+  content: string;
+  page_number: number | null;
+  clause_label: string | null;
+}
 
 export async function POST(request: Request) {
-  const { question } = await request.json();
+  const { question, documentIds: filterDocumentIds } = await request.json();
 
   if (!question || typeof question !== "string") {
     return Response.json({ error: "A question is required." }, { status: 400 });
   }
 
   const supabase = getSupabaseServerClient();
+  const filterIds =
+    Array.isArray(filterDocumentIds) && filterDocumentIds.length > 0
+      ? filterDocumentIds
+      : null;
+
   const [questionEmbedding] = await embedTexts([question]);
 
-  const { data: matches, error: matchError } = await supabase.rpc(
-    "match_document_chunks",
-    { query_embedding: questionEmbedding, match_count: MATCH_COUNT }
+  const { data: vectorMatches, error: matchError } = await supabase.rpc(
+    "match_document_chunks_diverse",
+    {
+      query_embedding: questionEmbedding,
+      chunks_per_document: CHUNKS_PER_DOCUMENT,
+      max_documents: MAX_DOCUMENTS,
+      filter_document_ids: filterIds,
+    }
   );
 
   if (matchError) {
     return Response.json({ error: matchError.message }, { status: 500 });
   }
 
-  if (!matches || matches.length === 0) {
+  // Guarantee any clause number the user names explicitly is included, even if it
+  // didn't rank in the top vector matches.
+  const clauseNumbers = [...new Set(question.match(CLAUSE_PATTERN) ?? [])] as string[];
+  let exactMatches: MatchRow[] = [];
+  if (clauseNumbers.length > 0) {
+    let query = supabase
+      .from("document_chunks")
+      .select("id, document_id, content, page_number, clause_label")
+      .or(clauseNumbers.map((c) => `clause_label.ilike.${c}%`).join(","));
+    if (filterIds) query = query.in("document_id", filterIds);
+    const { data } = await query;
+    exactMatches = data ?? [];
+  }
+
+  const seen = new Set<string>();
+  const matches: MatchRow[] = [];
+  for (const row of [...(vectorMatches ?? []), ...exactMatches]) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    matches.push(row);
+  }
+
+  if (matches.length === 0) {
     return Response.json({
       answer: "No documents have been uploaded yet, so there's nothing to search.",
       citations: [],
     });
   }
 
-  const documentIds = [...new Set(matches.map((m: { document_id: string }) => m.document_id))];
+  const documentIds = [...new Set(matches.map((m) => m.document_id))];
   const { data: documents } = await supabase
     .from("documents")
     .select("id, title")
@@ -41,19 +83,12 @@ export async function POST(request: Request) {
 
   const titleById = new Map((documents ?? []).map((d) => [d.id, d.title as string]));
 
-  const retrieved: RetrievedChunk[] = matches.map(
-    (m: {
-      document_id: string;
-      content: string;
-      page_number: number | null;
-      clause_label: string | null;
-    }) => ({
-      documentTitle: titleById.get(m.document_id) ?? "Unknown document",
-      pageNumber: m.page_number,
-      clauseLabel: m.clause_label,
-      content: m.content,
-    })
-  );
+  const retrieved: RetrievedChunk[] = matches.map((m) => ({
+    documentTitle: titleById.get(m.document_id) ?? "Unknown document",
+    pageNumber: m.page_number,
+    clauseLabel: m.clause_label,
+    content: m.content,
+  }));
 
   const answer = await askWithCitations(question, retrieved);
 
@@ -70,31 +105,26 @@ export async function POST(request: Request) {
   }
 
   const citations = await Promise.all(
-    matches.map(
-      async (
-        m: { document_id: string; page_number: number | null; clause_label: string | null },
-        i: number
-      ) => {
-        const key = `${m.document_id}:${m.page_number}`;
-        const pageFigures = figuresByPage.get(key) ?? [];
+    matches.map(async (m, i) => {
+      const key = `${m.document_id}:${m.page_number}`;
+      const pageFigures = figuresByPage.get(key) ?? [];
 
-        const figures = await Promise.all(
-          pageFigures.map(async (fig) => {
-            const { data: signed } = await supabase.storage
-              .from("standards-figures")
-              .createSignedUrl(fig.storage_path, 3600);
-            return { url: signed?.signedUrl ?? null, label: fig.label };
-          })
-        );
+      const figures = await Promise.all(
+        pageFigures.map(async (fig) => {
+          const { data: signed } = await supabase.storage
+            .from("standards-figures")
+            .createSignedUrl(fig.storage_path, 3600);
+          return { url: signed?.signedUrl ?? null, label: fig.label };
+        })
+      );
 
-        return {
-          documentTitle: retrieved[i].documentTitle,
-          pageNumber: m.page_number,
-          clauseLabel: m.clause_label,
-          figures: figures.filter((f) => f.url),
-        };
-      }
-    )
+      return {
+        documentTitle: retrieved[i].documentTitle,
+        pageNumber: m.page_number,
+        clauseLabel: m.clause_label,
+        figures: figures.filter((f) => f.url),
+      };
+    })
   );
 
   return Response.json({ answer, citations });

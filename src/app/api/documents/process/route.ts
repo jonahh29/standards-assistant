@@ -2,6 +2,7 @@ import { getDocumentProxy, extractText } from "unpdf";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { chunkPages } from "@/lib/chunk";
 import { embedTexts } from "@/lib/voyage";
+import { extractFigures } from "@/lib/figures";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -71,6 +72,32 @@ export async function POST(request: Request) {
         .insert(rows);
 
       if (chunkError) throw new Error(chunkError.message);
+    }
+
+    const figures = await extractFigures(pdf, pages);
+
+    for (let i = 0; i < figures.length; i++) {
+      const figure = figures[i];
+      const figurePath = `${document.id}/${figure.pageNumber}-${i}.png`;
+
+      const { error: figureUploadError } = await supabase.storage
+        .from("standards-figures")
+        .upload(figurePath, figure.png, { contentType: "image/png" });
+
+      if (figureUploadError) throw new Error(figureUploadError.message);
+
+      const { error: figureInsertError } = await supabase
+        .from("document_figures")
+        .insert({
+          document_id: document.id,
+          page_number: figure.pageNumber,
+          storage_path: figurePath,
+          label: figure.label,
+          width: figure.width,
+          height: figure.height,
+        });
+
+      if (figureInsertError) throw new Error(figureInsertError.message);
     }
 
     await supabase

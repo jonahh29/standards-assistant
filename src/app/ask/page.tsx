@@ -2,10 +2,16 @@
 
 import { useState } from "react";
 
+interface Figure {
+  url: string;
+  label: string | null;
+}
+
 interface Citation {
   documentTitle: string;
   pageNumber: number | null;
   clauseLabel: string | null;
+  figures: Figure[];
 }
 
 export default function AskPage() {
@@ -72,15 +78,31 @@ export default function AskPage() {
           {citations.length > 0 && (
             <div className="flex flex-col gap-1 border-t border-cyan/20 pt-4">
               <span className="text-sm text-offwhite/60">Sources</span>
-              <ul className="flex flex-col gap-1 font-mono text-sm text-cyan">
+              <ul className="flex flex-col gap-3">
                 {citations.map((c, i) => (
-                  <li key={i}>
-                    {c.documentTitle}
-                    {c.clauseLabel
-                      ? ` — clause ${c.clauseLabel}`
-                      : c.pageNumber
-                        ? ` — p.${c.pageNumber}`
-                        : ""}
+                  <li key={i} className="flex flex-col gap-2">
+                    <span className="font-mono text-sm text-cyan">
+                      {c.documentTitle}
+                      {c.clauseLabel
+                        ? ` — clause ${c.clauseLabel}`
+                        : c.pageNumber
+                          ? ` — p.${c.pageNumber}`
+                          : ""}
+                    </span>
+                    {c.figures.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {c.figures.map((fig, j) => (
+                          <a key={j} href={fig.url} target="_blank" rel="noopener noreferrer">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={fig.url}
+                              alt={fig.label ?? `Figure from ${c.documentTitle}`}
+                              className="h-24 w-auto rounded border border-cyan/30"
+                            />
+                          </a>
+                        ))}
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>

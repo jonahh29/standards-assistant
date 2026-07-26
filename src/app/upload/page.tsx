@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { UploadForm } from "./UploadForm";
 
@@ -26,7 +27,9 @@ export default async function UploadPage() {
                 key={doc.id}
                 className="flex items-center justify-between rounded border border-cyan/20 px-4 py-2"
               >
-                <span>{doc.title}</span>
+                <Link href={`/documents/${doc.id}`} className="hover:text-cyan">
+                  {doc.title}
+                </Link>
                 <span className="font-mono text-sm">
                   {doc.status === "ready" && (
                     <span className="text-cyan">ready</span>

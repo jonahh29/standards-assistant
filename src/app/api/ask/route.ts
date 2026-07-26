@@ -57,11 +57,45 @@ export async function POST(request: Request) {
 
   const answer = await askWithCitations(question, retrieved);
 
-  const citations = retrieved.map((r) => ({
-    documentTitle: r.documentTitle,
-    pageNumber: r.pageNumber,
-    clauseLabel: r.clauseLabel,
-  }));
+  const { data: figureRows } = await supabase
+    .from("document_figures")
+    .select("document_id, page_number, storage_path, label")
+    .in("document_id", documentIds);
+
+  const figuresByPage = new Map<string, { storage_path: string; label: string | null }[]>();
+  for (const row of figureRows ?? []) {
+    const key = `${row.document_id}:${row.page_number}`;
+    if (!figuresByPage.has(key)) figuresByPage.set(key, []);
+    figuresByPage.get(key)!.push({ storage_path: row.storage_path, label: row.label });
+  }
+
+  const citations = await Promise.all(
+    matches.map(
+      async (
+        m: { document_id: string; page_number: number | null; clause_label: string | null },
+        i: number
+      ) => {
+        const key = `${m.document_id}:${m.page_number}`;
+        const pageFigures = figuresByPage.get(key) ?? [];
+
+        const figures = await Promise.all(
+          pageFigures.map(async (fig) => {
+            const { data: signed } = await supabase.storage
+              .from("standards-figures")
+              .createSignedUrl(fig.storage_path, 3600);
+            return { url: signed?.signedUrl ?? null, label: fig.label };
+          })
+        );
+
+        return {
+          documentTitle: retrieved[i].documentTitle,
+          pageNumber: m.page_number,
+          clauseLabel: m.clause_label,
+          figures: figures.filter((f) => f.url),
+        };
+      }
+    )
+  );
 
   return Response.json({ answer, citations });
 }

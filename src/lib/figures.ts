@@ -18,7 +18,8 @@ export interface ExtractedFigure {
 
 const MIN_DIMENSION = 100;
 const RENDER_SCALE = 1.5;
-const LABEL_PATTERN = /^\s*(Figure\s+\d+(?:\.\d+)*|Table\s+\d+(?:\.\d+)*)\s*:/im;
+// Matches caption lines like "Figure 9.2.2a:", "Figure 9.2.5g/h:", "Table 5.6.3:"
+const LABEL_PATTERN = /^\s*((?:Figure|Table)\s+\d+(?:\.\d+)*[a-z]?(?:\/[a-z])?)\s*:/gim;
 
 let pdfjsModuleReady: Promise<void> | null = null;
 
@@ -32,9 +33,8 @@ export function ensurePdfjsModule() {
   return pdfjsModuleReady;
 }
 
-function detectLabel(pageText: string): string | null {
-  const match = pageText.match(LABEL_PATTERN);
-  return match ? match[1] : null;
+function detectLabels(pageText: string): string[] {
+  return [...pageText.matchAll(LABEL_PATTERN)].map((m) => m[1]);
 }
 
 /**
@@ -51,9 +51,9 @@ export async function extractFigures(
   const figures: ExtractedFigure[] = [];
 
   for (let pageNumber = 1; pageNumber <= pages.length; pageNumber++) {
-    const label = detectLabel(pages[pageNumber - 1] ?? "");
+    const labels = detectLabels(pages[pageNumber - 1] ?? "");
 
-    if (label) {
+    if (labels.length > 0) {
       const rendered = await renderPageAsImage(pdf, pageNumber, {
         canvasImport: () => import("@napi-rs/canvas"),
         scale: RENDER_SCALE,
@@ -63,7 +63,7 @@ export async function extractFigures(
 
       figures.push({
         pageNumber,
-        label,
+        label: labels.join(", "),
         width: metadata.width ?? 0,
         height: metadata.height ?? 0,
         png,

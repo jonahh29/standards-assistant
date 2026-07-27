@@ -13,6 +13,7 @@ interface StoredCitation {
   pageNumber: number | null;
   pageEnd: number | null;
   clauseLabel: string | null;
+  content?: string;
   figures: StoredFigure[];
 }
 

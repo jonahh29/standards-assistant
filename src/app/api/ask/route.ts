@@ -155,6 +155,7 @@ export async function POST(request: Request) {
         pageNumber: m.page_number,
         pageEnd: m.page_end,
         clauseLabel: m.clause_label,
+        content: m.content,
         figures: figures.filter((f) => f.url),
       };
     })

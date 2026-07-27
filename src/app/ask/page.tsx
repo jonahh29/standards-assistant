@@ -1,24 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
-import { FigureThumbnail } from "@/app/FigureThumbnail";
 import { FavouritesSidebar } from "./FavouritesSidebar";
-
-interface Figure {
-  url: string;
-  label: string | null;
-  storagePath?: string;
-}
-
-interface Citation {
-  documentTitle: string;
-  pageNumber: number | null;
-  pageEnd: number | null;
-  clauseLabel: string | null;
-  figures: Figure[];
-}
+import { CitationMark } from "./CitationMark";
+import { splitTextWithCitations, type Citation } from "./citationMatching";
 
 interface DocOption {
   id: string;
@@ -27,35 +14,25 @@ interface DocOption {
 
 type MdProps<T> = T & { node?: unknown };
 
-const markdownComponents = {
-  h1: ({ node, ...props }: MdProps<React.ComponentProps<"h1">>) => (
-    <h1 className="font-heading text-xl font-semibold mt-4 first:mt-0" {...props} />
-  ),
-  h2: ({ node, ...props }: MdProps<React.ComponentProps<"h2">>) => (
-    <h2 className="font-heading text-lg font-semibold mt-4 first:mt-0" {...props} />
-  ),
-  h3: ({ node, ...props }: MdProps<React.ComponentProps<"h3">>) => (
-    <h3 className="font-heading text-base font-semibold mt-3 first:mt-0" {...props} />
-  ),
-  p: ({ node, ...props }: MdProps<React.ComponentProps<"p">>) => (
-    <p className="leading-relaxed" {...props} />
-  ),
-  strong: ({ node, ...props }: MdProps<React.ComponentProps<"strong">>) => (
-    <strong className="font-semibold text-cyan" {...props} />
-  ),
-  ul: ({ node, ...props }: MdProps<React.ComponentProps<"ul">>) => (
-    <ul className="list-disc pl-5 flex flex-col gap-1" {...props} />
-  ),
-  ol: ({ node, ...props }: MdProps<React.ComponentProps<"ol">>) => (
-    <ol className="list-decimal pl-5 flex flex-col gap-1" {...props} />
-  ),
-  li: ({ node, ...props }: MdProps<React.ComponentProps<"li">>) => (
-    <li className="leading-relaxed" {...props} />
-  ),
-  code: ({ node, ...props }: MdProps<React.ComponentProps<"code">>) => (
-    <code className="font-mono text-sm text-cyan" {...props} />
-  ),
-};
+function renderWithCitations(children: React.ReactNode, citations: Citation[]): React.ReactNode {
+  const processNode = (node: React.ReactNode, key: string): React.ReactNode => {
+    if (typeof node !== "string") return node;
+    const parts = splitTextWithCitations(node, citations);
+    if (parts.length === 1 && typeof parts[0] === "string") return node;
+    return parts.map((part, i) =>
+      typeof part === "string" ? (
+        <Fragment key={`${key}-${i}`}>{part}</Fragment>
+      ) : (
+        <CitationMark key={`${key}-${i}`} match={part} />
+      )
+    );
+  };
+
+  if (Array.isArray(children)) {
+    return children.map((child, i) => processNode(child, `c${i}`));
+  }
+  return processNode(children, "c0");
+}
 
 export default function AskPage() {
   const [question, setQuestion] = useState("");
@@ -79,6 +56,40 @@ export default function AskPage() {
       .order("title")
       .then(({ data }) => setAllDocs(data ?? []));
   }, []);
+
+  const markdownComponents = {
+    h1: ({ node, ...props }: MdProps<React.ComponentProps<"h1">>) => (
+      <h1 className="font-heading text-xl font-semibold mt-4 first:mt-0" {...props} />
+    ),
+    h2: ({ node, ...props }: MdProps<React.ComponentProps<"h2">>) => (
+      <h2 className="font-heading text-lg font-semibold mt-4 first:mt-0" {...props} />
+    ),
+    h3: ({ node, ...props }: MdProps<React.ComponentProps<"h3">>) => (
+      <h3 className="font-heading text-base font-semibold mt-3 first:mt-0" {...props} />
+    ),
+    p: ({ node, children, ...props }: MdProps<React.ComponentProps<"p">>) => (
+      <p className="leading-relaxed" {...props}>
+        {renderWithCitations(children, citations)}
+      </p>
+    ),
+    strong: ({ node, ...props }: MdProps<React.ComponentProps<"strong">>) => (
+      <strong className="font-semibold text-cyan" {...props} />
+    ),
+    ul: ({ node, ...props }: MdProps<React.ComponentProps<"ul">>) => (
+      <ul className="list-disc pl-5 flex flex-col gap-1" {...props} />
+    ),
+    ol: ({ node, ...props }: MdProps<React.ComponentProps<"ol">>) => (
+      <ol className="list-decimal pl-5 flex flex-col gap-1" {...props} />
+    ),
+    li: ({ node, children, ...props }: MdProps<React.ComponentProps<"li">>) => (
+      <li className="leading-relaxed" {...props}>
+        {renderWithCitations(children, citations)}
+      </li>
+    ),
+    code: ({ node, ...props }: MdProps<React.ComponentProps<"code">>) => (
+      <code className="font-mono text-sm text-cyan" {...props} />
+    ),
+  };
 
   function toggleDoc(id: string) {
     setSelectedIds((prev) => {
@@ -225,37 +236,6 @@ export default function AskPage() {
                     : "☆ Favourite"}
               </button>
             </div>
-            {citations.length > 0 && (
-              <div className="flex flex-col gap-1 border-t border-cyan/20 pt-4">
-                <span className="text-sm text-offwhite/60">Sources</span>
-                <ul className="flex flex-col gap-3">
-                  {citations.map((c, i) => (
-                    <li key={i} className="flex flex-col gap-2">
-                      <span className="font-mono text-sm text-cyan">
-                        {c.documentTitle}
-                        {c.clauseLabel
-                          ? ` — clause ${c.clauseLabel}`
-                          : c.pageNumber
-                            ? ` — p.${c.pageNumber}`
-                            : ""}
-                      </span>
-                      {c.figures.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
-                          {c.figures.map((fig, j) => (
-                            <FigureThumbnail
-                              key={j}
-                              url={fig.url}
-                              label={fig.label ?? `Figure from ${c.documentTitle}`}
-                              className="h-24 w-auto rounded border border-cyan/30"
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
           </div>
         )}
       </div>

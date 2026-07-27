@@ -14,6 +14,7 @@ interface IncomingCitation {
   pageNumber: number | null;
   pageEnd: number | null;
   clauseLabel: string | null;
+  content: string;
   figures: IncomingFigure[];
 }
 
@@ -63,6 +64,7 @@ export async function POST(request: Request) {
     pageNumber: c.pageNumber,
     pageEnd: c.pageEnd,
     clauseLabel: c.clauseLabel,
+    content: c.content,
     figures: (c.figures ?? []).map((f) => ({ storagePath: f.storagePath, label: f.label })),
   }));
 

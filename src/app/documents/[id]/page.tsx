@@ -1,4 +1,5 @@
 import { getSupabaseServerClient } from "@/lib/supabase-server";
+import { FigureThumbnail } from "@/app/FigureThumbnail";
 
 export const dynamic = "force-dynamic";
 
@@ -53,25 +54,21 @@ export default async function DocumentPage({
         </p>
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-          {figures.map((fig, i) => (
-            <a
-              key={i}
-              href={fig.url ?? undefined}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex flex-col gap-1 rounded border border-cyan/20 p-2"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={fig.url ?? undefined}
-                alt={fig.label ?? `Figure on page ${fig.pageNumber}`}
+          {figures.map((fig, i) =>
+            fig.url ? (
+              <FigureThumbnail
+                key={i}
+                url={fig.url}
+                label={fig.label ?? `Figure on page ${fig.pageNumber}`}
+                wrapperClassName="rounded border border-cyan/20 p-2"
                 className="w-full rounded"
-              />
-              <span className="font-mono text-xs text-offwhite/60">
-                {fig.label ?? `p.${fig.pageNumber}`}
-              </span>
-            </a>
-          ))}
+              >
+                <span className="font-mono text-xs text-offwhite/60">
+                  {fig.label ?? `p.${fig.pageNumber}`}
+                </span>
+              </FigureThumbnail>
+            ) : null
+          )}
         </div>
       )}
     </div>

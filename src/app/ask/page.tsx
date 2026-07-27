@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { FigureThumbnail } from "@/app/FigureThumbnail";
 
 interface Figure {
   url: string;
@@ -194,14 +195,12 @@ export default function AskPage() {
                     {c.figures.length > 0 && (
                       <div className="flex flex-wrap gap-2">
                         {c.figures.map((fig, j) => (
-                          <a key={j} href={fig.url} target="_blank" rel="noopener noreferrer">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={fig.url}
-                              alt={fig.label ?? `Figure from ${c.documentTitle}`}
-                              className="h-24 w-auto rounded border border-cyan/30"
-                            />
-                          </a>
+                          <FigureThumbnail
+                            key={j}
+                            url={fig.url}
+                            label={fig.label ?? `Figure from ${c.documentTitle}`}
+                            className="h-24 w-auto rounded border border-cyan/30"
+                          />
                         ))}
                       </div>
                     )}

@@ -47,3 +47,25 @@ export async function askWithCitations(
   const textBlock = response.content.find((block) => block.type === "text");
   return textBlock?.type === "text" ? textBlock.text : "";
 }
+
+/** Short, scannable title for a favourited Q&A — a trivial summarization, so a cheap/fast model is fine here. */
+export async function generateFavouriteTitle(
+  question: string,
+  answer: string
+): Promise<string> {
+  const response = await client.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 30,
+    system:
+      "Write a concise 5-8 word title summarizing this Q&A, suitable for a sidebar list entry. No quotes, no trailing period, no markdown — plain text only.",
+    messages: [
+      {
+        role: "user",
+        content: `Question: ${question}\n\nAnswer: ${answer.slice(0, 1000)}`,
+      },
+    ],
+  });
+
+  const textBlock = response.content.find((block) => block.type === "text");
+  return textBlock?.type === "text" ? textBlock.text.trim() : "";
+}

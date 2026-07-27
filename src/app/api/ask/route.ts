@@ -146,7 +146,7 @@ export async function POST(request: Request) {
           const { data: signed } = await supabase.storage
             .from("standards-figures")
             .createSignedUrl(fig.storage_path, 3600);
-          return { url: signed?.signedUrl ?? null, label: fig.label };
+          return { url: signed?.signedUrl ?? null, label: fig.label, storagePath: fig.storage_path };
         })
       );
 

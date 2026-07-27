@@ -1,4 +1,5 @@
 import { getSupabaseServerClient } from "@/lib/supabase-server";
+import { getSessionUser, isAdmin } from "@/lib/supabase-session";
 
 export const runtime = "nodejs";
 
@@ -6,6 +7,10 @@ export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!isAdmin(await getSessionUser())) {
+    return Response.json({ error: "Admin access required." }, { status: 403 });
+  }
+
   const { id } = await params;
   const supabase = getSupabaseServerClient();
 
@@ -44,6 +49,10 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!isAdmin(await getSessionUser())) {
+    return Response.json({ error: "Admin access required." }, { status: 403 });
+  }
+
   const { id } = await params;
   const { title } = await request.json();
 

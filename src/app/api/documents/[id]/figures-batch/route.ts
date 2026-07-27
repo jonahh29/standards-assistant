@@ -1,6 +1,7 @@
 import { getDocumentProxy } from "unpdf";
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { ensurePdfjsModule, renderFigurePage, type PageLabels } from "@/lib/figures";
+import { getSessionUser, isAdmin } from "@/lib/supabase-session";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -11,6 +12,10 @@ export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!isAdmin(await getSessionUser())) {
+    return Response.json({ error: "Admin access required." }, { status: 403 });
+  }
+
   const { id } = await params;
   const supabase = getSupabaseServerClient();
 

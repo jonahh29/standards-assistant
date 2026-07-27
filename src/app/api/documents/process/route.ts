@@ -3,6 +3,7 @@ import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { chunkDocument } from "@/lib/chunk";
 import { embedTexts } from "@/lib/voyage";
 import { detectPageLabels, extractRasterImages, ensurePdfjsModule } from "@/lib/figures";
+import { getSessionUser, isAdmin } from "@/lib/supabase-session";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -10,6 +11,10 @@ export const maxDuration = 300;
 const EMBED_BATCH_SIZE = 20;
 
 export async function POST(request: Request) {
+  if (!isAdmin(await getSessionUser())) {
+    return Response.json({ error: "Admin access required." }, { status: 403 });
+  }
+
   const { title, filename, storagePath } = await request.json();
 
   if (!title || !filename || !storagePath) {

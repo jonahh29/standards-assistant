@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Space_Grotesk, IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import Link from "next/link";
+import { getSessionUser, isAdmin } from "@/lib/supabase-session";
+import { SignOutButton } from "./SignOutButton";
 import "./globals.css";
 
 const spaceGrotesk = Space_Grotesk({
@@ -25,11 +27,14 @@ export const metadata: Metadata = {
   description: "Ask cited questions about Australian Standards PDFs",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const user = await getSessionUser();
+  const admin = isAdmin(user);
+
   return (
     <html
       lang="en"
@@ -42,21 +47,31 @@ export default function RootLayout({
             <img src="/logo-icon.svg" alt="ResiDraft" className="h-7 w-auto" />
             Standards Assistant
           </span>
-          <Link href="/" className="text-sm text-offwhite/80 hover:text-cyan">
-            Home
-          </Link>
-          <Link
-            href="/upload"
-            className="text-sm text-offwhite/80 hover:text-cyan"
-          >
-            Upload
-          </Link>
-          <Link
-            href="/ask"
-            className="text-sm text-offwhite/80 hover:text-cyan"
-          >
-            Ask
-          </Link>
+          {user && (
+            <>
+              <Link href="/" className="text-sm text-offwhite/80 hover:text-cyan">
+                Home
+              </Link>
+              {admin && (
+                <Link
+                  href="/upload"
+                  className="text-sm text-offwhite/80 hover:text-cyan"
+                >
+                  Upload
+                </Link>
+              )}
+              <Link
+                href="/ask"
+                className="text-sm text-offwhite/80 hover:text-cyan"
+              >
+                Ask
+              </Link>
+              <span className="ml-auto flex items-center gap-3 font-body">
+                <span className="text-sm text-offwhite/40">{user.email}</span>
+                <SignOutButton />
+              </span>
+            </>
+          )}
         </nav>
         <div className="flex flex-1 flex-col">{children}</div>
       </body>

@@ -1,8 +1,13 @@
 import { getSupabaseServerClient } from "@/lib/supabase-server";
+import { getSessionUser, isAdmin } from "@/lib/supabase-session";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  if (!isAdmin(await getSessionUser())) {
+    return Response.json({ error: "Admin access required." }, { status: 403 });
+  }
+
   const { filename } = await request.json();
 
   if (!filename || typeof filename !== "string") {

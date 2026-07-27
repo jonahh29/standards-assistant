@@ -17,28 +17,30 @@ export function CitationMark({ match }: { match: CitationMatch }) {
         {match.text}
       </span>
       {hovered && (
-        <div className="absolute bottom-full left-1/2 z-50 mb-2 w-72 -translate-x-1/2 rounded border border-cyan/30 bg-navy p-3 text-left normal-case shadow-lg">
-          <div className="mb-1 font-mono text-xs text-offwhite/50">
-            {match.citation.documentTitle}
-            {match.citation.clauseLabel
-              ? ` — clause ${match.citation.clauseLabel}`
-              : match.citation.pageNumber
-                ? ` — p.${match.citation.pageNumber}`
-                : ""}
-          </div>
-          {figureToShow && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={figureToShow.url}
-              alt={figureToShow.label ?? ""}
-              className="mb-2 max-h-40 w-full rounded object-contain"
-            />
-          )}
-          {match.citation.content && (
-            <div className="line-clamp-6 text-xs leading-relaxed text-offwhite/80">
-              {match.citation.content}
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy/90 p-8 pointer-events-none">
+          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col gap-3 overflow-hidden rounded-lg border border-cyan/30 bg-navy p-6 text-left normal-case shadow-2xl">
+            <div className="font-mono text-sm text-offwhite/50">
+              {match.citation.documentTitle}
+              {match.citation.clauseLabel
+                ? ` — clause ${match.citation.clauseLabel}`
+                : match.citation.pageNumber
+                  ? ` — p.${match.citation.pageNumber}`
+                  : ""}
             </div>
-          )}
+            {figureToShow && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={figureToShow.url}
+                alt={figureToShow.label ?? ""}
+                className="max-h-[65vh] w-full rounded border border-cyan/20 object-contain"
+              />
+            )}
+            {match.citation.content && (
+              <div className="overflow-y-auto text-base leading-relaxed text-offwhite/90">
+                {match.citation.content}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </span>

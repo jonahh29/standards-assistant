@@ -18,6 +18,25 @@ interface MatchRow {
   clause_label: string | null;
 }
 
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Retrieval intentionally casts a wide net (up to ~24 chunks across several
+// documents) so multi-standard questions get full coverage — but that means many
+// retrieved chunks end up not actually used in the answer. Only surface a citation
+// (and its figures) if Claude's answer text actually references that clause/page,
+// matching the citation style enforced by the system prompt.
+function wasActuallyCited(m: MatchRow, answer: string): boolean {
+  if (m.clause_label) {
+    if (new RegExp(`\\b${escapeRegex(m.clause_label)}\\b`).test(answer)) return true;
+  }
+  if (m.page_number != null) {
+    if (new RegExp(`p\\.\\s?${m.page_number}\\b`).test(answer)) return true;
+  }
+  return false;
+}
+
 export async function POST(request: Request) {
   const { question, documentIds: filterDocumentIds } = await request.json();
 
@@ -93,6 +112,12 @@ export async function POST(request: Request) {
 
   const answer = await askWithCitations(question, retrieved);
 
+  // Narrow down to citations the answer actually references — falls back to the
+  // full retrieved set only if the heuristic finds nothing (safer than showing zero
+  // sources on an unusual answer format).
+  const citedMatches = matches.filter((m) => wasActuallyCited(m, answer));
+  const finalMatches = citedMatches.length > 0 ? citedMatches : matches;
+
   const { data: figureRows } = await supabase
     .from("document_figures")
     .select("document_id, page_number, storage_path, label")
@@ -106,7 +131,7 @@ export async function POST(request: Request) {
   }
 
   const citations = await Promise.all(
-    matches.map(async (m, i) => {
+    finalMatches.map(async (m) => {
       // A clause's text commonly spans onto the page containing its figure, so match
       // figures against the chunk's whole page range, not just its starting page.
       const start = m.page_number ?? 0;
@@ -126,7 +151,7 @@ export async function POST(request: Request) {
       );
 
       return {
-        documentTitle: retrieved[i].documentTitle,
+        documentTitle: titleById.get(m.document_id) ?? "Unknown document",
         pageNumber: m.page_number,
         pageEnd: m.page_end,
         clauseLabel: m.clause_label,

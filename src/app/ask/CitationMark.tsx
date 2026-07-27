@@ -4,21 +4,26 @@ import { useState } from "react";
 import type { CitationMatch } from "./citationMatching";
 
 export function CitationMark({ match }: { match: CitationMatch }) {
-  const [hovered, setHovered] = useState(false);
+  const [open, setOpen] = useState(false);
   const figureToShow = match.kind === "figure" ? match.figure : match.citation.figures[0];
 
   return (
-    <span
-      className="relative inline-block"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      <span className="cursor-help border-b border-dashed border-cyan text-cyan">
+    <span className="relative inline-block">
+      <span
+        className="cursor-pointer border-b border-dashed border-cyan text-cyan"
+        onClick={() => setOpen(true)}
+      >
         {match.text}
       </span>
-      {hovered && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy/90 p-8 pointer-events-none">
-          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col gap-3 overflow-hidden rounded-lg border border-cyan/30 bg-navy p-6 text-left normal-case shadow-2xl">
+      {open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-navy/90 p-8"
+          onClick={() => setOpen(false)}
+        >
+          <div
+            className="flex max-h-[90vh] w-full max-w-4xl flex-col gap-3 overflow-hidden rounded-lg border border-cyan/30 bg-navy p-6 text-left normal-case shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="font-mono text-sm text-offwhite/50">
               {match.citation.documentTitle}
               {match.citation.clauseLabel

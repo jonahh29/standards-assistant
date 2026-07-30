@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, cloneElement, isValidElement, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { FavouritesSidebar } from "./FavouritesSidebar";
@@ -14,18 +14,29 @@ interface DocOption {
 
 type MdProps<T> = T & { node?: unknown };
 
+// Recurses into nested inline elements (e.g. **bold** citations, which markdown turns
+// into a <strong> wrapping the text) so a citation is still detected and made clickable
+// even when Claude formats it with emphasis instead of leaving it as plain text.
 function renderWithCitations(children: React.ReactNode, citations: Citation[]): React.ReactNode {
   const processNode = (node: React.ReactNode, key: string): React.ReactNode => {
-    if (typeof node !== "string") return node;
-    const parts = splitTextWithCitations(node, citations);
-    if (parts.length === 1 && typeof parts[0] === "string") return node;
-    return parts.map((part, i) =>
-      typeof part === "string" ? (
-        <Fragment key={`${key}-${i}`}>{part}</Fragment>
-      ) : (
-        <CitationMark key={`${key}-${i}`} match={part} />
-      )
-    );
+    if (typeof node === "string") {
+      const parts = splitTextWithCitations(node, citations);
+      if (parts.length === 1 && typeof parts[0] === "string") return node;
+      return parts.map((part, i) =>
+        typeof part === "string" ? (
+          <Fragment key={`${key}-${i}`}>{part}</Fragment>
+        ) : (
+          <CitationMark key={`${key}-${i}`} match={part} />
+        )
+      );
+    }
+    if (Array.isArray(node)) {
+      return node.map((child, i) => processNode(child, `${key}-${i}`));
+    }
+    if (isValidElement<{ children?: React.ReactNode }>(node) && node.props.children) {
+      return cloneElement(node, { key }, renderWithCitations(node.props.children, citations));
+    }
+    return node;
   };
 
   if (Array.isArray(children)) {

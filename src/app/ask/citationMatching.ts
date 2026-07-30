@@ -13,57 +13,19 @@ export interface Citation {
   figures: Figure[];
 }
 
-export type CitationMatch =
-  | { kind: "clause" | "page"; text: string; citation: Citation }
-  | { kind: "figure"; text: string; citation: Citation; figure: Figure };
+export interface CitationMatch {
+  kind: "figure";
+  text: string;
+  citation: Citation;
+  figure: Figure;
+}
 
-// Matches "(Document Title, clause 9.5.4)" or "(Document Title, p.212)", tolerating
-// an occasional sub-reference like "9.2.2(2)" that Claude sometimes appends.
-const PAREN_CITATION_PATTERN =
-  /\(([^,()]+),\s*(?:clause\s+([\d.]+[a-z]?(?:\(\w+\))*)|p\.\s*(\d+))\)/g;
-// Bare "Figure 9.5.4" / "Table 5.6.3" mentions in running prose.
+// Bare "Figure 9.5.4" / "Table 5.6.3" mentions in running prose. Clause/page text is
+// no longer auto-highlighted — it depended on Claude reliably reproducing an exact
+// "(Document title, clause X)" marker on every mention, which proved too fragile
+// under a conversational writing style. Figures are still detected here since the
+// figure's own filename/label match doesn't depend on Claude's phrasing at all.
 const FIGURE_MENTION_PATTERN = /\b((?:Figure|Table)\s+\d+(?:\.\d+)*[a-z]?)\b/g;
-
-function docTitleMatches(a: string, b: string): boolean {
-  return a.trim().toLowerCase() === b.trim().toLowerCase();
-}
-
-// A clause number can appear in more than one retrieved chunk — e.g. a bare heading
-// line from a contents/summary listing alongside the chunk with the clause's actual
-// body text. Prefer whichever candidate has the most content, so a popover never
-// shows a near-empty stub when the real text is also available.
-function richest(candidates: Citation[]): Citation | undefined {
-  if (candidates.length === 0) return undefined;
-  return candidates.reduce((best, c) => (c.content.length > best.content.length ? c : best));
-}
-
-function findClauseCitation(
-  citations: Citation[],
-  docTitle: string,
-  clauseRaw: string
-): Citation | undefined {
-  const clause = clauseRaw.replace(/(\(\w+\))+$/, "");
-  return richest(
-    citations.filter(
-      (c) => c.clauseLabel === clause && docTitleMatches(c.documentTitle, docTitle)
-    )
-  );
-}
-
-function findPageCitation(
-  citations: Citation[],
-  docTitle: string,
-  page: string
-): Citation | undefined {
-  return richest(
-    citations.filter(
-      (c) =>
-        !c.clauseLabel &&
-        c.pageNumber === Number(page) &&
-        docTitleMatches(c.documentTitle, docTitle)
-    )
-  );
-}
 
 function findFigureForMention(
   citations: Citation[],
@@ -83,7 +45,9 @@ interface RawMatch {
   match: CitationMatch;
 }
 
-/** Splits answer text into plain strings interleaved with recognized citation/figure mentions, cross-referenced against the retrieved citations. Anything not found in `citations` is left as plain text. */
+/** Splits answer text into plain strings interleaved with recognized figure/table
+ * mentions, cross-referenced against the retrieved citations. Anything not found in
+ * `citations` is left as plain text. */
 export function splitTextWithCitations(
   text: string,
   citations: Citation[]
@@ -91,20 +55,6 @@ export function splitTextWithCitations(
   if (citations.length === 0) return [text];
 
   const rawMatches: RawMatch[] = [];
-
-  for (const m of text.matchAll(PAREN_CITATION_PATTERN)) {
-    const [full, docTitle, clauseRaw, page] = m;
-    const citation = clauseRaw
-      ? findClauseCitation(citations, docTitle, clauseRaw)
-      : findPageCitation(citations, docTitle, page);
-    if (citation) {
-      rawMatches.push({
-        index: m.index!,
-        length: full.length,
-        match: { kind: clauseRaw ? "clause" : "page", text: full, citation },
-      });
-    }
-  }
 
   for (const m of text.matchAll(FIGURE_MENTION_PATTERN)) {
     const mention = m[1];

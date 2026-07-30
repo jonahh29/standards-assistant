@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { FavouritesSidebar } from "./FavouritesSidebar";
 import { CitationMark } from "./CitationMark";
+import { CitationPopover } from "./CitationPopover";
 import { splitTextWithCitations, type Citation } from "./citationMatching";
 
 interface DocOption {
@@ -38,6 +39,8 @@ export default function AskPage() {
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<string | null>(null);
   const [citations, setCitations] = useState<Citation[]>([]);
+  const [offeredClause, setOfferedClause] = useState<Citation | null>(null);
+  const [showOfferedClause, setShowOfferedClause] = useState(false);
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -108,6 +111,8 @@ export default function AskPage() {
     setAnswer(null);
     setErrorMessage("");
     setFavouriteStatus("idle");
+    setOfferedClause(null);
+    setShowOfferedClause(false);
 
     const res = await fetch("/api/ask", {
       method: "POST",
@@ -127,6 +132,7 @@ export default function AskPage() {
 
     setAnswer(json.answer);
     setCitations(json.citations ?? []);
+    setOfferedClause(json.offeredClause ?? null);
     setStatus("idle");
   }
 
@@ -150,6 +156,8 @@ export default function AskPage() {
     setQuestion(data.question);
     setAnswer(data.answer);
     setCitations(data.citations as Citation[]);
+    setOfferedClause(null);
+    setShowOfferedClause(false);
     setStatus("idle");
     setFavouriteStatus("saved");
   }
@@ -236,7 +244,24 @@ export default function AskPage() {
                     : "☆ Favourite"}
               </button>
             </div>
+            {offeredClause && (
+              <div className="flex items-center justify-between gap-4 border-t border-cyan/20 pt-4">
+                <span className="text-sm text-offwhite/60">
+                  Want the full text of clause {offeredClause.clauseLabel}?
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowOfferedClause(true)}
+                  className="shrink-0 rounded border border-cyan/40 px-3 py-1.5 font-mono text-sm text-cyan hover:bg-cyan/10"
+                >
+                  Yes, show me
+                </button>
+              </div>
+            )}
           </div>
+        )}
+        {showOfferedClause && offeredClause && (
+          <CitationPopover citation={offeredClause} onClose={() => setShowOfferedClause(false)} />
         )}
       </div>
     </div>

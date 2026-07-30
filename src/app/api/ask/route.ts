@@ -1,6 +1,7 @@
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { embedTexts } from "@/lib/voyage";
 import { askWithCitations, type RetrievedChunk } from "@/lib/anthropic";
+import type { Citation } from "@/app/ask/citationMatching";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -92,6 +93,7 @@ export async function POST(request: Request) {
     return Response.json({
       answer: "No documents have been uploaded yet, so there's nothing to search.",
       citations: [],
+      offeredClause: null,
     });
   }
 
@@ -130,7 +132,7 @@ export async function POST(request: Request) {
     figuresByPage.get(key)!.push({ storage_path: row.storage_path, label: row.label });
   }
 
-  const citations = await Promise.all(
+  const rawCitations = await Promise.all(
     finalMatches.map(async (m) => {
       // A clause's text commonly spans onto the page containing its figure, so match
       // figures against the chunk's whole page range, not just its starting page.
@@ -156,10 +158,31 @@ export async function POST(request: Request) {
         pageEnd: m.page_end,
         clauseLabel: m.clause_label,
         content: m.content,
-        figures: figures.filter((f) => f.url),
+        figures: figures.filter((f) => f.url) as Citation["figures"],
       };
     })
   );
 
-  return Response.json({ answer, citations });
+  // A clause number can appear in more than one retrieved chunk — e.g. a bare
+  // heading line from a contents/summary listing alongside the chunk with the
+  // clause's actual body text. Keep only the richest (most content) entry per
+  // document+clause so nothing downstream ever picks the near-empty stub.
+  const bestByKey = new Map<string, Citation>();
+  for (const c of rawCitations) {
+    const key = `${c.documentTitle}:::${c.clauseLabel ?? `p${c.pageNumber}`}`;
+    const existing = bestByKey.get(key);
+    if (!existing || c.content.length > existing.content.length) {
+      bestByKey.set(key, c);
+    }
+  }
+  const citations = [...bestByKey.values()];
+
+  // Offer to pull up the most substantial clause discussed, so the user can get the
+  // full text on demand via a button rather than the answer trying to cram it all in.
+  const offeredClause =
+    citations
+      .filter((c) => c.clauseLabel)
+      .sort((a, b) => b.content.length - a.content.length)[0] ?? null;
+
+  return Response.json({ answer, citations, offeredClause });
 }

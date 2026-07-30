@@ -28,14 +28,25 @@ function docTitleMatches(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
+// A clause number can appear in more than one retrieved chunk — e.g. a bare heading
+// line from a contents/summary listing alongside the chunk with the clause's actual
+// body text. Prefer whichever candidate has the most content, so a popover never
+// shows a near-empty stub when the real text is also available.
+function richest(candidates: Citation[]): Citation | undefined {
+  if (candidates.length === 0) return undefined;
+  return candidates.reduce((best, c) => (c.content.length > best.content.length ? c : best));
+}
+
 function findClauseCitation(
   citations: Citation[],
   docTitle: string,
   clauseRaw: string
 ): Citation | undefined {
   const clause = clauseRaw.replace(/(\(\w+\))+$/, "");
-  return citations.find(
-    (c) => c.clauseLabel === clause && docTitleMatches(c.documentTitle, docTitle)
+  return richest(
+    citations.filter(
+      (c) => c.clauseLabel === clause && docTitleMatches(c.documentTitle, docTitle)
+    )
   );
 }
 
@@ -44,11 +55,13 @@ function findPageCitation(
   docTitle: string,
   page: string
 ): Citation | undefined {
-  return citations.find(
-    (c) =>
-      !c.clauseLabel &&
-      c.pageNumber === Number(page) &&
-      docTitleMatches(c.documentTitle, docTitle)
+  return richest(
+    citations.filter(
+      (c) =>
+        !c.clauseLabel &&
+        c.pageNumber === Number(page) &&
+        docTitleMatches(c.documentTitle, docTitle)
+    )
   );
 }
 

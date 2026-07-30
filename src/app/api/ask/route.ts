@@ -32,7 +32,13 @@ function wasActuallyCited(m: MatchRow, answer: string): boolean {
   if (m.clause_label) {
     // Require the word "clause" right before the number — a bare number match (e.g.
     // "0.2") false-positives against ordinary decimal measurements like "0.2 mm".
-    if (new RegExp(`\\bclause\\s+${escapeRegex(m.clause_label)}\\b`, "i").test(answer)) return true;
+    // The trailing (?!\.?\d) stops a shorter clause number from matching as a prefix
+    // of a longer one — without it, "clause 4.2" matches inside "clause 4.2.8", so an
+    // unrelated clause 4.2 in a different document gets falsely credited as cited.
+    if (
+      new RegExp(`\\bclause\\s+${escapeRegex(m.clause_label)}(?!\\.?\\d)`, "i").test(answer)
+    )
+      return true;
   }
   if (m.page_number != null) {
     if (new RegExp(`p\\.\\s?${m.page_number}\\b`).test(answer)) return true;

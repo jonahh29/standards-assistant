@@ -106,28 +106,62 @@ export default function AskPage() {
 
     setStatus("loading");
     setAnswer(null);
+    setCitations([]);
     setErrorMessage("");
     setFavouriteStatus("idle");
 
-    const res = await fetch("/api/ask", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        question,
-        documentIds: selectedIds.size > 0 ? [...selectedIds] : undefined,
-      }),
-    });
-    const json = await res.json();
+    let res: Response;
+    try {
+      res = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question,
+          documentIds: selectedIds.size > 0 ? [...selectedIds] : undefined,
+        }),
+      });
+    } catch {
+      setStatus("error");
+      setErrorMessage("Something went wrong.");
+      return;
+    }
 
-    if (!res.ok) {
+    if (!res.ok || !res.body) {
+      const json = await res.json().catch(() => ({}));
       setStatus("error");
       setErrorMessage(json.error ?? "Something went wrong.");
       return;
     }
 
-    setAnswer(json.answer);
-    setCitations(json.citations ?? []);
-    setStatus("idle");
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let currentAnswer = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (value) {
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line);
+          if (event.type === "delta") {
+            currentAnswer += event.text;
+            setAnswer(currentAnswer);
+          } else if (event.type === "citations") {
+            setCitations(event.citations ?? []);
+          } else if (event.type === "error") {
+            setStatus("error");
+            setErrorMessage(event.error ?? "Something went wrong.");
+          }
+        }
+      }
+      if (done) break;
+    }
+
+    setStatus((s) => (s === "error" ? s : "idle"));
   }
 
   async function handleFavourite() {

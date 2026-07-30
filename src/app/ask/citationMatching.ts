@@ -33,7 +33,7 @@ function findClauseCitation(
   docTitle: string,
   clauseRaw: string
 ): Citation | undefined {
-  const clause = clauseRaw.replace(/\(\w+\)$/, "");
+  const clause = clauseRaw.replace(/(\(\w+\))+$/, "");
   return citations.find(
     (c) => c.clauseLabel === clause && docTitleMatches(c.documentTitle, docTitle)
   );

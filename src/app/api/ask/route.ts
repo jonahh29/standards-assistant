@@ -5,7 +5,7 @@ import { streamWithCitations, type RetrievedChunk } from "@/lib/anthropic";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const CHUNKS_PER_DOCUMENT = 4;
+const CHUNKS_PER_DOCUMENT = 8;
 const MAX_DOCUMENTS = 6;
 const CLAUSE_PATTERN = /\b\d{1,2}(?:\.\d{1,3}){1,4}[a-z]?\b/g;
 

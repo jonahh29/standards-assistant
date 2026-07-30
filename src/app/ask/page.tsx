@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, cloneElement, isValidElement, useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { FavouritesSidebar } from "./FavouritesSidebar";
@@ -14,29 +14,18 @@ interface DocOption {
 
 type MdProps<T> = T & { node?: unknown };
 
-// Recurses into nested inline elements (e.g. **bold** citations, which markdown turns
-// into a <strong> wrapping the text) so a citation is still detected and made clickable
-// even when Claude formats it with emphasis instead of leaving it as plain text.
 function renderWithCitations(children: React.ReactNode, citations: Citation[]): React.ReactNode {
   const processNode = (node: React.ReactNode, key: string): React.ReactNode => {
-    if (typeof node === "string") {
-      const parts = splitTextWithCitations(node, citations);
-      if (parts.length === 1 && typeof parts[0] === "string") return node;
-      return parts.map((part, i) =>
-        typeof part === "string" ? (
-          <Fragment key={`${key}-${i}`}>{part}</Fragment>
-        ) : (
-          <CitationMark key={`${key}-${i}`} match={part} />
-        )
-      );
-    }
-    if (Array.isArray(node)) {
-      return node.map((child, i) => processNode(child, `${key}-${i}`));
-    }
-    if (isValidElement<{ children?: React.ReactNode }>(node) && node.props.children) {
-      return cloneElement(node, { key }, renderWithCitations(node.props.children, citations));
-    }
-    return node;
+    if (typeof node !== "string") return node;
+    const parts = splitTextWithCitations(node, citations);
+    if (parts.length === 1 && typeof parts[0] === "string") return node;
+    return parts.map((part, i) =>
+      typeof part === "string" ? (
+        <Fragment key={`${key}-${i}`}>{part}</Fragment>
+      ) : (
+        <CitationMark key={`${key}-${i}`} match={part} />
+      )
+    );
   };
 
   if (Array.isArray(children)) {
@@ -117,62 +106,28 @@ export default function AskPage() {
 
     setStatus("loading");
     setAnswer(null);
-    setCitations([]);
     setErrorMessage("");
     setFavouriteStatus("idle");
 
-    let res: Response;
-    try {
-      res = await fetch("/api/ask", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question,
-          documentIds: selectedIds.size > 0 ? [...selectedIds] : undefined,
-        }),
-      });
-    } catch {
-      setStatus("error");
-      setErrorMessage("Something went wrong.");
-      return;
-    }
+    const res = await fetch("/api/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question,
+        documentIds: selectedIds.size > 0 ? [...selectedIds] : undefined,
+      }),
+    });
+    const json = await res.json();
 
-    if (!res.ok || !res.body) {
-      const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
       setStatus("error");
       setErrorMessage(json.error ?? "Something went wrong.");
       return;
     }
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let currentAnswer = "";
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (value) {
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          const event = JSON.parse(line);
-          if (event.type === "delta") {
-            currentAnswer += event.text;
-            setAnswer(currentAnswer);
-          } else if (event.type === "citations") {
-            setCitations(event.citations ?? []);
-          } else if (event.type === "error") {
-            setStatus("error");
-            setErrorMessage(event.error ?? "Something went wrong.");
-          }
-        }
-      }
-      if (done) break;
-    }
-
-    setStatus((s) => (s === "error" ? s : "idle"));
+    setAnswer(json.answer);
+    setCitations(json.citations ?? []);
+    setStatus("idle");
   }
 
   async function handleFavourite() {

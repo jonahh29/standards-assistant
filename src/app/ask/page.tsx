@@ -76,7 +76,7 @@ export default function AskPage() {
       </p>
     ),
     strong: ({ node, ...props }: MdProps<React.ComponentProps<"strong">>) => (
-      <strong className="font-semibold text-cyan" {...props} />
+      <strong className="font-semibold" {...props} />
     ),
     ul: ({ node, ...props }: MdProps<React.ComponentProps<"ul">>) => (
       <ul className="list-disc pl-5 flex flex-col gap-1" {...props} />

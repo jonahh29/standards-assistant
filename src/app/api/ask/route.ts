@@ -30,7 +30,9 @@ function escapeRegex(s: string): string {
 // matching the citation style enforced by the system prompt.
 function wasActuallyCited(m: MatchRow, answer: string): boolean {
   if (m.clause_label) {
-    if (new RegExp(`\\b${escapeRegex(m.clause_label)}\\b`).test(answer)) return true;
+    // Require the word "clause" right before the number — a bare number match (e.g.
+    // "0.2") false-positives against ordinary decimal measurements like "0.2 mm".
+    if (new RegExp(`\\bclause\\s+${escapeRegex(m.clause_label)}\\b`, "i").test(answer)) return true;
   }
   if (m.page_number != null) {
     if (new RegExp(`p\\.\\s?${m.page_number}\\b`).test(answer)) return true;

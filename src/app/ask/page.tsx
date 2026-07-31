@@ -4,6 +4,7 @@ import { Fragment, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { FavouritesSidebar } from "./FavouritesSidebar";
+import { HistorySidebar } from "./HistorySidebar";
 import { CitationMark } from "./CitationMark";
 import { CitationPopover } from "./CitationPopover";
 import { splitTextWithCitations, type Citation } from "./citationMatching";
@@ -50,6 +51,7 @@ export default function AskPage() {
 
   const [favouriteStatus, setFavouriteStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [favouritesRefreshKey, setFavouritesRefreshKey] = useState(0);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
@@ -134,6 +136,16 @@ export default function AskPage() {
     setCitations(json.citations ?? []);
     setOfferedClause(json.offeredClause ?? null);
     setStatus("idle");
+
+    // Save to history in the background — doesn't block the answer from showing,
+    // and a failure here shouldn't interrupt the user's flow.
+    fetch("/api/history", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, answer: json.answer, citations: json.citations ?? [] }),
+    }).then((res) => {
+      if (res.ok) setHistoryRefreshKey((k) => k + 1);
+    });
   }
 
   async function handleFavourite() {
@@ -148,18 +160,17 @@ export default function AskPage() {
     if (res.ok) setFavouritesRefreshKey((k) => k + 1);
   }
 
-  function handleSelectFavourite(data: {
-    question: string;
-    answer: string;
-    citations: unknown[];
-  }) {
+  function handleLoadSaved(
+    data: { question: string; answer: string; citations: unknown[] },
+    alreadyFavourited: boolean
+  ) {
     setQuestion(data.question);
     setAnswer(data.answer);
     setCitations(data.citations as Citation[]);
     setOfferedClause(null);
     setShowOfferedClause(false);
     setStatus("idle");
-    setFavouriteStatus("saved");
+    setFavouriteStatus(alreadyFavourited ? "saved" : "idle");
   }
 
   const scopeLabel =
@@ -171,7 +182,10 @@ export default function AskPage() {
 
   return (
     <div className="flex flex-1">
-      <FavouritesSidebar refreshKey={favouritesRefreshKey} onSelect={handleSelectFavourite} />
+      <FavouritesSidebar
+        refreshKey={favouritesRefreshKey}
+        onSelect={(data) => handleLoadSaved(data, true)}
+      />
 
       <div className="flex flex-1 flex-col gap-8 px-6 py-10 max-w-2xl mx-auto w-full">
         <h1 className="font-heading text-2xl font-semibold">Ask a question</h1>
@@ -264,6 +278,11 @@ export default function AskPage() {
           <CitationPopover citation={offeredClause} onClose={() => setShowOfferedClause(false)} />
         )}
       </div>
+
+      <HistorySidebar
+        refreshKey={historyRefreshKey}
+        onSelect={(data) => handleLoadSaved(data, false)}
+      />
     </div>
   );
 }

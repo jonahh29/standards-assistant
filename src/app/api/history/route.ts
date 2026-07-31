@@ -1,6 +1,5 @@
 import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { getSessionUser } from "@/lib/supabase-session";
-import { generateFavouriteTitle } from "@/lib/anthropic";
 
 export const runtime = "nodejs";
 
@@ -50,15 +49,9 @@ export async function POST(request: Request) {
     return Response.json({ error: "question and answer are required." }, { status: 400 });
   }
 
-  let title: string;
-  try {
-    title = await generateFavouriteTitle(question, answer);
-  } catch {
-    title = "";
-  }
-  if (!title) {
-    title = question.length > 60 ? `${question.slice(0, 60)}…` : question;
-  }
+  // Unlike Favourites (deliberately curated, worth a generated summary title),
+  // history is every question asked — just show the question itself, shortened.
+  const title = question.length > 60 ? `${question.slice(0, 60)}…` : question;
 
   // Store only what's needed to re-render later — drop the ephemeral signed url,
   // keep the storage path so a fresh one can be generated whenever this is opened.

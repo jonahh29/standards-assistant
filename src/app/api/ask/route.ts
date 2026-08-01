@@ -134,10 +134,30 @@ export async function POST(request: Request) {
     .in("document_id", documentIds);
 
   const figuresByPage = new Map<string, { storage_path: string; label: string | null }[]>();
+  // A table spanning multiple pages gets one document_figures row per page, all
+  // sharing the exact same label (see detectPageLabels) — indexing by label lets a
+  // continuation page be found even if a chunk's page range doesn't quite reach it.
+  // Some documents reuse generic labels like "Table 1" for many unrelated tables, so
+  // matches also carry page_number, letting the lookup below only trust a same-label
+  // match that's actually near the cited page range rather than anywhere in the doc.
+  const figuresByLabel = new Map<
+    string,
+    { storage_path: string; label: string | null; page_number: number }[]
+  >();
   for (const row of figureRows ?? []) {
-    const key = `${row.document_id}:${row.page_number}`;
-    if (!figuresByPage.has(key)) figuresByPage.set(key, []);
-    figuresByPage.get(key)!.push({ storage_path: row.storage_path, label: row.label });
+    const pageKey = `${row.document_id}:${row.page_number}`;
+    if (!figuresByPage.has(pageKey)) figuresByPage.set(pageKey, []);
+    figuresByPage.get(pageKey)!.push({ storage_path: row.storage_path, label: row.label });
+
+    for (const sub of (row.label ?? "").split(",").map((s: string) => s.trim()).filter(Boolean)) {
+      const labelKey = `${row.document_id}:::${sub}`;
+      if (!figuresByLabel.has(labelKey)) figuresByLabel.set(labelKey, []);
+      figuresByLabel.get(labelKey)!.push({
+        storage_path: row.storage_path,
+        label: row.label,
+        page_number: row.page_number,
+      });
+    }
   }
 
   const rawCitations = await Promise.all(
@@ -146,9 +166,32 @@ export async function POST(request: Request) {
       // figures against the chunk's whole page range, not just its starting page.
       const start = m.page_number ?? 0;
       const end = m.page_end ?? start;
-      const pageFigures = [];
+      const seenPaths = new Set<string>();
+      const pageFigures: { storage_path: string; label: string | null }[] = [];
+      const addFigure = (fig: { storage_path: string; label: string | null }) => {
+        if (seenPaths.has(fig.storage_path)) return;
+        seenPaths.add(fig.storage_path);
+        pageFigures.push(fig);
+      };
       for (let p = start; p <= end; p++) {
-        pageFigures.push(...(figuresByPage.get(`${m.document_id}:${p}`) ?? []));
+        for (const fig of figuresByPage.get(`${m.document_id}:${p}`) ?? []) addFigure(fig);
+      }
+      // Supplement with a same-labeled figure just outside the page range — picks up a
+      // multi-page table's continuation page even when a chunk's page_end falls just
+      // short of it. Capped to a small distance so a generic reused label (some
+      // documents caption every table just "Table 1") can't pull in an unrelated
+      // table from elsewhere in the document.
+      const NEARBY_PAGES = 3;
+      for (const fig of [...pageFigures]) {
+        for (const sub of (fig.label ?? "").split(",").map((s) => s.trim()).filter(Boolean)) {
+          for (const match of figuresByLabel.get(`${m.document_id}:::${sub}`) ?? []) {
+            const distance = Math.min(
+              Math.abs(match.page_number - start),
+              Math.abs(match.page_number - end)
+            );
+            if (distance <= NEARBY_PAGES) addFigure(match);
+          }
+        }
       }
 
       const figures = await Promise.all(

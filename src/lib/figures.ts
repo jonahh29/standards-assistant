@@ -25,6 +25,16 @@ const MIN_DIMENSION = 100;
 const RENDER_SCALE = 1.5;
 // Matches caption lines like "Figure 9.2.2a:", "Figure 9.2.5g/h:", "Table 5.6.3:"
 const LABEL_PATTERN = /^\s*((?:Figure|Table)\s+\d+(?:\.\d+)*[a-z]?(?:\/[a-z])?)\s*:/gim;
+// A bare numbered clause header at the start of a line — mirrors chunk.ts's pattern,
+// used here only to detect where a table's continuation onto the next page ends.
+const CLAUSE_HEADER_PATTERN = /^\s*\d{1,2}(?:\.\d{1,3}){1,4}[a-z]?\s+\S/m;
+const DOT_LEADER_PATTERN = /\.{4,}/;
+
+function hasNewClauseHeader(pageText: string): boolean {
+  return pageText
+    .split("\n")
+    .some((line) => !DOT_LEADER_PATTERN.test(line) && CLAUSE_HEADER_PATTERN.test(line));
+}
 
 let pdfjsModuleReady: Promise<void> | null = null;
 
@@ -38,15 +48,50 @@ export function ensurePdfjsModule() {
   return pdfjsModuleReady;
 }
 
-/** Pure text-based caption detection — no rendering. Returns only pages that have at least one "Figure X.Y:" / "Table X.Y:" caption. */
+// Absence of a new clause header isn't a reliable enough stop condition on its own —
+// some documents go many pages without anything matching our clause-number pattern
+// (e.g. NCC Volume 2's non-numbered sections), which let one false match run away
+// across 190+ pages in testing. Capping the chain bounds any misfire to a couple of
+// extra page renders instead of a large chunk of the document.
+const MAX_CONTINUATION_PAGES = 2;
+
+/** Pure text-based caption detection — no rendering. Returns pages that have at least
+ * one "Figure X.Y:" / "Table X.Y:" caption, plus up to MAX_CONTINUATION_PAGES pages
+ * immediately after a Table caption that look like a continuation of that same table
+ * (no new caption and no new clause header on them) — tables with many rows commonly
+ * spill onto a second page, unlike diagrams, which is why only "Table" captions (not
+ * "Figure") get this check. */
 export function detectPageLabels(pages: string[]): PageLabels[] {
   const result: PageLabels[] = [];
+  let continuingTableLabels: string[] | null = null;
+  let continuationCount = 0;
+
   for (let pageNumber = 1; pageNumber <= pages.length; pageNumber++) {
-    const labels = [...(pages[pageNumber - 1] ?? "").matchAll(LABEL_PATTERN)].map(
-      (m) => m[1]
-    );
-    if (labels.length > 0) result.push({ page: pageNumber, labels });
+    const pageText = pages[pageNumber - 1] ?? "";
+    const labels = [...pageText.matchAll(LABEL_PATTERN)].map((m) => m[1]);
+
+    if (labels.length > 0) {
+      result.push({ page: pageNumber, labels });
+      const tableLabels = labels.filter((l) => l.toLowerCase().startsWith("table"));
+      continuingTableLabels = tableLabels.length > 0 ? tableLabels : null;
+      continuationCount = 0;
+      continue;
+    }
+
+    if (
+      continuingTableLabels &&
+      continuationCount < MAX_CONTINUATION_PAGES &&
+      !hasNewClauseHeader(pageText)
+    ) {
+      result.push({ page: pageNumber, labels: continuingTableLabels });
+      continuationCount++;
+      continue;
+    }
+
+    continuingTableLabels = null;
+    continuationCount = 0;
   }
+
   return result;
 }
 

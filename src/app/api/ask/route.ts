@@ -214,17 +214,32 @@ export async function POST(request: Request) {
     })
   );
 
-  // A clause number can appear in more than one retrieved chunk — e.g. a bare
-  // heading line from a contents/summary listing alongside the chunk with the
-  // clause's actual body text. Keep only the richest (most content) entry per
-  // document+clause so nothing downstream ever picks the near-empty stub.
+  // A clause number can appear in more than one retrieved chunk — e.g. a bare heading
+  // line from a contents/summary listing alongside the chunk with the clause's actual
+  // body text, or (as with an oversized clause) a size-triggered split where a later
+  // sub-chunk's page range reaches further than the first. Keep the richest (most
+  // content) chunk's text for the popover — a stub heading should never win that — but
+  // union every candidate's figures rather than discarding the loser's entirely, since
+  // a chunk with less prose can still have found a figure the winner's page range missed.
   const bestByKey = new Map<string, Citation>();
   for (const c of rawCitations) {
     const key = `${c.documentTitle}:::${c.clauseLabel ?? `p${c.pageNumber}`}`;
     const existing = bestByKey.get(key);
-    if (!existing || c.content.length > existing.content.length) {
+    if (!existing) {
       bestByKey.set(key, c);
+      continue;
     }
+    const richer = c.content.length > existing.content.length ? c : existing;
+    const other = richer === c ? existing : c;
+    const seenPaths = new Set(richer.figures.map((f) => f.storagePath));
+    const mergedFigures = [...richer.figures];
+    for (const fig of other.figures) {
+      if (!seenPaths.has(fig.storagePath)) {
+        seenPaths.add(fig.storagePath);
+        mergedFigures.push(fig);
+      }
+    }
+    bestByKey.set(key, { ...richer, figures: mergedFigures });
   }
   const citations = [...bestByKey.values()];
 

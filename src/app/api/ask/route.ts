@@ -128,6 +128,54 @@ export async function POST(request: Request) {
   const citedMatches = matches.filter((m) => wasActuallyCited(m, answer));
   const finalMatches = citedMatches.length > 0 ? citedMatches : matches;
 
+  // A long clause can get split into multiple stored chunks (chunk.ts's
+  // MAX_CLAUSE_CHUNK_SIZE), and only one of those needs to rank well enough to be
+  // retrieved for the question — its own page range then stops short of a table that
+  // only appears in a later sibling chunk (dense table text ranks poorly on its own).
+  // Look up every chunk sharing each cited clause's label so figure-matching uses the
+  // clause's true full extent, not just whichever one sub-chunk was retrieved.
+  const citedClauseLabels = [...new Set(finalMatches.filter((m) => m.clause_label).map((m) => m.clause_label as string))];
+  const clauseChunksByDoc = new Map<string, { page_number: number | null; page_end: number | null }[]>();
+  if (citedClauseLabels.length > 0) {
+    const { data: siblingChunks } = await supabase
+      .from("document_chunks")
+      .select("document_id, clause_label, page_number, page_end")
+      .in("document_id", documentIds)
+      .in("clause_label", citedClauseLabels);
+    for (const row of siblingChunks ?? []) {
+      const key = `${row.document_id}:::${row.clause_label}`;
+      if (!clauseChunksByDoc.has(key)) clauseChunksByDoc.set(key, []);
+      clauseChunksByDoc.get(key)!.push({ page_number: row.page_number, page_end: row.page_end });
+    }
+  }
+
+  // Flood-fills the matched chunk's own range outward to only the sibling chunks that
+  // are contiguous or nearly so (within `slack` pages) — deliberately excludes a
+  // same-labeled but far-away chunk (e.g. an unrelated stub reusing the same clause
+  // number elsewhere in the document) from ballooning the range.
+  function expandClauseRange(
+    base: { start: number; end: number },
+    siblings: { page_number: number | null; page_end: number | null }[],
+    slack = 2
+  ): { start: number; end: number } {
+    let { start, end } = base;
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const s of siblings) {
+        const sStart = s.page_number ?? start;
+        const sEnd = s.page_end ?? sStart;
+        const overlaps = sStart <= end + slack && sEnd >= start - slack;
+        if (overlaps && (sStart < start || sEnd > end)) {
+          start = Math.min(start, sStart);
+          end = Math.max(end, sEnd);
+          changed = true;
+        }
+      }
+    }
+    return { start, end };
+  }
+
   const { data: figureRows } = await supabase
     .from("document_figures")
     .select("document_id, page_number, storage_path, label")
@@ -163,9 +211,14 @@ export async function POST(request: Request) {
   const rawCitations = await Promise.all(
     finalMatches.map(async (m) => {
       // A clause's text commonly spans onto the page containing its figure, so match
-      // figures against the chunk's whole page range, not just its starting page.
-      const start = m.page_number ?? 0;
-      const end = m.page_end ?? start;
+      // figures against the clause's whole page range (expanded across any sibling
+      // chunks from a size-triggered split), not just this one chunk's own range.
+      const ownStart = m.page_number ?? 0;
+      const ownEnd = m.page_end ?? ownStart;
+      const siblings = m.clause_label
+        ? clauseChunksByDoc.get(`${m.document_id}:::${m.clause_label}`) ?? []
+        : [];
+      const { start, end } = expandClauseRange({ start: ownStart, end: ownEnd }, siblings);
       const seenPaths = new Set<string>();
       const pageFigures: { storage_path: string; label: string | null }[] = [];
       const addFigure = (fig: { storage_path: string; label: string | null }) => {

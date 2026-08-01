@@ -112,6 +112,7 @@ export async function POST(request: Request) {
     .in("id", documentIds);
 
   const titleById = new Map((documents ?? []).map((d) => [d.id, d.title as string]));
+  const docIdByTitle = new Map((documents ?? []).map((d) => [d.title as string, d.id as string]));
 
   const retrieved: RetrievedChunk[] = matches.map((m) => ({
     documentTitle: titleById.get(m.document_id) ?? "Unknown document",
@@ -135,17 +136,28 @@ export async function POST(request: Request) {
   // Look up every chunk sharing each cited clause's label so figure-matching uses the
   // clause's true full extent, not just whichever one sub-chunk was retrieved.
   const citedClauseLabels = [...new Set(finalMatches.filter((m) => m.clause_label).map((m) => m.clause_label as string))];
-  const clauseChunksByDoc = new Map<string, { page_number: number | null; page_end: number | null }[]>();
+  interface SiblingChunk {
+    page_number: number | null;
+    page_end: number | null;
+    content: string;
+    chunk_index: number;
+  }
+  const clauseChunksByDoc = new Map<string, SiblingChunk[]>();
   if (citedClauseLabels.length > 0) {
     const { data: siblingChunks } = await supabase
       .from("document_chunks")
-      .select("document_id, clause_label, page_number, page_end")
+      .select("document_id, clause_label, page_number, page_end, content, chunk_index")
       .in("document_id", documentIds)
       .in("clause_label", citedClauseLabels);
     for (const row of siblingChunks ?? []) {
       const key = `${row.document_id}:::${row.clause_label}`;
       if (!clauseChunksByDoc.has(key)) clauseChunksByDoc.set(key, []);
-      clauseChunksByDoc.get(key)!.push({ page_number: row.page_number, page_end: row.page_end });
+      clauseChunksByDoc.get(key)!.push({
+        page_number: row.page_number,
+        page_end: row.page_end,
+        content: row.content,
+        chunk_index: row.chunk_index,
+      });
     }
   }
 
@@ -298,10 +310,36 @@ export async function POST(request: Request) {
 
   // Offer to pull up the most substantial clause discussed, so the user can get the
   // full text on demand via a button rather than the answer trying to cram it all in.
-  const offeredClause =
+  const offeredClauseCandidate =
     citations
       .filter((c) => c.clauseLabel)
       .sort((a, b) => b.content.length - a.content.length)[0] ?? null;
+
+  // A single stored chunk is often only part of the clause (see the size-triggered
+  // split above) — "show me the full clause" needs to actually mean full, so
+  // reconstruct it from every sibling chunk within the clause's expanded page range,
+  // stitched back together in original document order.
+  let offeredClause: Citation | null = offeredClauseCandidate;
+  if (offeredClauseCandidate?.clauseLabel) {
+    const docId = docIdByTitle.get(offeredClauseCandidate.documentTitle);
+    const key = docId ? `${docId}:::${offeredClauseCandidate.clauseLabel}` : null;
+    const siblings = key ? clauseChunksByDoc.get(key) ?? [] : [];
+    if (siblings.length > 0) {
+      const ownStart = offeredClauseCandidate.pageNumber ?? 0;
+      const ownEnd = offeredClauseCandidate.pageEnd ?? ownStart;
+      const { start, end } = expandClauseRange({ start: ownStart, end: ownEnd }, siblings);
+      const fullText = siblings
+        .filter((s) => {
+          const sStart = s.page_number ?? start;
+          const sEnd = s.page_end ?? sStart;
+          return sStart <= end && sEnd >= start;
+        })
+        .sort((a, b) => a.chunk_index - b.chunk_index)
+        .map((s) => s.content)
+        .join("\n\n");
+      offeredClause = { ...offeredClauseCandidate, content: fullText || offeredClauseCandidate.content };
+    }
+  }
 
   return Response.json({ answer, citations, offeredClause });
 }

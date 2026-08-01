@@ -20,12 +20,16 @@ export interface CitationMatch {
   figure: Figure;
 }
 
-// Bare "Figure 9.5.4" / "Table 5.6.3" mentions in running prose. Clause/page text is
-// no longer auto-highlighted — it depended on Claude reliably reproducing an exact
-// "(Document title, clause X)" marker on every mention, which proved too fragile
-// under a conversational writing style. Figures are still detected here since the
-// figure's own filename/label match doesn't depend on Claude's phrasing at all.
-const FIGURE_MENTION_PATTERN = /\b((?:Figure|Table)\s+\d+(?:\.\d+)*[a-z]?)\b/g;
+// Bare "Figure 9.5.4" / "Table 5.6.3" mentions in running prose, including a list that
+// only states the keyword once — "Table 6.3.9a, 6.3.9b and 6.3.9c" — rather than
+// repeating it before every number. Clause/page text is no longer auto-highlighted —
+// it depended on Claude reliably reproducing an exact "(Document title, clause X)"
+// marker on every mention, which proved too fragile under a conversational writing
+// style. Figures are still detected here since the figure's own filename/label match
+// doesn't depend on Claude's phrasing at all.
+const FIGURE_GROUP_PATTERN =
+  /\b(Figures?|Tables?)\s+(\d+(?:\.\d+)*[a-z]?(?:\s*(?:,|and)\s*\d+(?:\.\d+)*[a-z]?)*)/g;
+const TOKEN_PATTERN = /\d+(?:\.\d+)*[a-z]?/g;
 
 function findFigureForMention(
   citations: Citation[],
@@ -56,21 +60,40 @@ export function splitTextWithCitations(
 
   const rawMatches: RawMatch[] = [];
 
-  for (const m of text.matchAll(FIGURE_MENTION_PATTERN)) {
-    const mention = m[1];
-    const found = findFigureForMention(citations, mention);
-    if (found) {
-      rawMatches.push({
-        index: m.index!,
-        length: mention.length,
-        match: {
-          kind: "figure",
-          text: mention,
-          citation: found.citation,
-          figure: found.figure,
-        },
-      });
-    }
+  for (const m of text.matchAll(FIGURE_GROUP_PATTERN)) {
+    const keyword = m[1];
+    const singular = keyword.replace(/s$/, "");
+    const listText = m[2];
+    const listStart = m.index! + (m[0].length - listText.length);
+
+    [...listText.matchAll(TOKEN_PATTERN)].forEach((tok, i) => {
+      const token = tok[0];
+      const found = findFigureForMention(citations, `${singular} ${token}`);
+      if (!found) return;
+
+      if (i === 0) {
+        // First item keeps the keyword highlighted too (e.g. "Table 6.3.9a"),
+        // matching how a lone mention has always been highlighted.
+        rawMatches.push({
+          index: m.index!,
+          length: keyword.length + 1 + token.length,
+          match: {
+            kind: "figure",
+            text: `${keyword} ${token}`,
+            citation: found.citation,
+            figure: found.figure,
+          },
+        });
+      } else {
+        // A later item in a list ("...6.3.9b and 6.3.9c") doesn't repeat the keyword
+        // in the source text, so only the bare number itself can be highlighted.
+        rawMatches.push({
+          index: listStart + tok.index!,
+          length: token.length,
+          match: { kind: "figure", text: token, citation: found.citation, figure: found.figure },
+        });
+      }
+    });
   }
 
   if (rawMatches.length === 0) return [text];

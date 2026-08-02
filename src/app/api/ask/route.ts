@@ -309,35 +309,38 @@ export async function POST(request: Request) {
   const citations = [...bestByKey.values()];
 
   // Offer to pull up the most substantial clause discussed, so the user can get the
-  // full text on demand via a button rather than the answer trying to cram it all in.
+  // literal source page(s) on demand via a button rather than the answer trying to
+  // cram it all in. Points at the actual rendered PDF page image, not extracted text —
+  // a single stored chunk is often only part of the clause (see the size-triggered
+  // split above), so "the full clause" needs the clause's true full page range,
+  // expanded across any sibling chunks the same way figure-lookup does above.
   const offeredClauseCandidate =
     citations
       .filter((c) => c.clauseLabel)
       .sort((a, b) => b.content.length - a.content.length)[0] ?? null;
 
-  // A single stored chunk is often only part of the clause (see the size-triggered
-  // split above) — "show me the full clause" needs to actually mean full, so
-  // reconstruct it from every sibling chunk within the clause's expanded page range,
-  // stitched back together in original document order.
-  let offeredClause: Citation | null = offeredClauseCandidate;
+  let offeredClause: {
+    documentId: string;
+    documentTitle: string;
+    clauseLabel: string;
+    pageStart: number;
+    pageEnd: number;
+  } | null = null;
+
   if (offeredClauseCandidate?.clauseLabel) {
     const docId = docIdByTitle.get(offeredClauseCandidate.documentTitle);
-    const key = docId ? `${docId}:::${offeredClauseCandidate.clauseLabel}` : null;
-    const siblings = key ? clauseChunksByDoc.get(key) ?? [] : [];
-    if (siblings.length > 0) {
+    if (docId) {
+      const siblings = clauseChunksByDoc.get(`${docId}:::${offeredClauseCandidate.clauseLabel}`) ?? [];
       const ownStart = offeredClauseCandidate.pageNumber ?? 0;
       const ownEnd = offeredClauseCandidate.pageEnd ?? ownStart;
       const { start, end } = expandClauseRange({ start: ownStart, end: ownEnd }, siblings);
-      const fullText = siblings
-        .filter((s) => {
-          const sStart = s.page_number ?? start;
-          const sEnd = s.page_end ?? sStart;
-          return sStart <= end && sEnd >= start;
-        })
-        .sort((a, b) => a.chunk_index - b.chunk_index)
-        .map((s) => s.content)
-        .join("\n\n");
-      offeredClause = { ...offeredClauseCandidate, content: fullText || offeredClauseCandidate.content };
+      offeredClause = {
+        documentId: docId,
+        documentTitle: offeredClauseCandidate.documentTitle,
+        clauseLabel: offeredClauseCandidate.clauseLabel,
+        pageStart: start,
+        pageEnd: end,
+      };
     }
   }
 

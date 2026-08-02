@@ -6,12 +6,20 @@ import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { FavouritesSidebar } from "./FavouritesSidebar";
 import { HistorySidebar } from "./HistorySidebar";
 import { CitationMark } from "./CitationMark";
-import { CitationPopover } from "./CitationPopover";
+import { ClausePagesPopover } from "./ClausePagesPopover";
 import { splitTextWithCitations, type Citation } from "./citationMatching";
 
 interface DocOption {
   id: string;
   title: string;
+}
+
+interface OfferedClause {
+  documentId: string;
+  documentTitle: string;
+  clauseLabel: string;
+  pageStart: number;
+  pageEnd: number;
 }
 
 type MdProps<T> = T & { node?: unknown };
@@ -52,7 +60,7 @@ export default function AskPage() {
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<string | null>(null);
   const [citations, setCitations] = useState<Citation[]>([]);
-  const [offeredClause, setOfferedClause] = useState<Citation | null>(null);
+  const [offeredClause, setOfferedClause] = useState<OfferedClause | null>(null);
   const [showOfferedClause, setShowOfferedClause] = useState(false);
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState("");
@@ -273,7 +281,7 @@ export default function AskPage() {
             {offeredClause && (
               <div className="flex items-center justify-between gap-4 border-t border-cyan/20 pt-4">
                 <span className="text-sm text-offwhite/60">
-                  Want the full text of clause {offeredClause.clauseLabel}?
+                  Want to see the source page(s) for clause {offeredClause.clauseLabel}?
                 </span>
                 <button
                   type="button"
@@ -287,7 +295,14 @@ export default function AskPage() {
           </div>
         )}
         {showOfferedClause && offeredClause && (
-          <CitationPopover citation={offeredClause} onClose={() => setShowOfferedClause(false)} />
+          <ClausePagesPopover
+            documentId={offeredClause.documentId}
+            documentTitle={offeredClause.documentTitle}
+            clauseLabel={offeredClause.clauseLabel}
+            pageStart={offeredClause.pageStart}
+            pageEnd={offeredClause.pageEnd}
+            onClose={() => setShowOfferedClause(false)}
+          />
         )}
       </div>
 

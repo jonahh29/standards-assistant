@@ -308,16 +308,24 @@ export async function POST(request: Request) {
   }
   const citations = [...bestByKey.values()];
 
-  // Offer to pull up the most substantial clause discussed, so the user can get the
-  // literal source page(s) on demand via a button rather than the answer trying to
-  // cram it all in. Points at the actual rendered PDF page image, not extracted text —
-  // a single stored chunk is often only part of the clause (see the size-triggered
-  // split above), so "the full clause" needs the clause's true full page range,
-  // expanded across any sibling chunks the same way figure-lookup does above.
+  // Offer to pull up the clause the answer actually centers on, so the user can get
+  // the literal source page(s) on demand via a button rather than the answer trying
+  // to cram it all in. "Most content" was a weak proxy for "most relevant" - a
+  // citation can carry a lot of text while only being tangentially mentioned once
+  // (e.g. cited by page rather than by clause), while the clause the answer actually
+  // walks through in depth gets referenced by name repeatedly. Counting how many
+  // times each clause is actually named in the answer is a much more direct signal.
   const offeredClauseCandidate =
     citations
       .filter((c) => c.clauseLabel)
-      .sort((a, b) => b.content.length - a.content.length)[0] ?? null;
+      .map((c) => {
+        const mentionCount = (
+          answer.match(new RegExp(`\\bclause\\s+${escapeRegex(c.clauseLabel!)}(?!\\.?\\d)`, "gi")) ?? []
+        ).length;
+        return { c, mentionCount };
+      })
+      .sort((a, b) => b.mentionCount - a.mentionCount || b.c.content.length - a.c.content.length)[0]
+      ?.c ?? null;
 
   let offeredClause: {
     documentId: string;

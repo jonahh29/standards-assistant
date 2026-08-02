@@ -258,6 +258,25 @@ export async function POST(request: Request) {
           }
         }
       }
+      // A clause's own explanatory figure sometimes sits just past where its last
+      // retrieved chunk happens to end (the size-triggered split can cut off right
+      // before it) without sharing a label with anything already in range — e.g. a
+      // table series ending on the same page a lone "Figure X" caption starts on a
+      // different label. Check a small trailing buffer for any figure there, but
+      // only if that page isn't already claimed by a different cited clause (i.e.
+      // genuinely the next section, not a continuation of this one).
+      const TRAILING_BUFFER = 2;
+      for (let p = end + 1; p <= end + TRAILING_BUFFER; p++) {
+        const claimedByOther = finalMatches.some(
+          (other) =>
+            other.document_id === m.document_id &&
+            other.clause_label &&
+            other.clause_label !== m.clause_label &&
+            (other.page_number === p || other.page_end === p)
+        );
+        if (claimedByOther) break;
+        for (const fig of figuresByPage.get(`${m.document_id}:${p}`) ?? []) addFigure(fig);
+      }
 
       const figures = await Promise.all(
         pageFigures.map(async (fig) => {

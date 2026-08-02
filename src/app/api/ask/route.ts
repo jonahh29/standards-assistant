@@ -162,13 +162,20 @@ export async function POST(request: Request) {
   }
 
   // Flood-fills the matched chunk's own range outward to only the sibling chunks that
-  // are contiguous or nearly so (within `slack` pages) — deliberately excludes a
-  // same-labeled but far-away chunk (e.g. an unrelated stub reusing the same clause
-  // number elsewhere in the document) from ballooning the range.
+  // directly overlap it (slack=0) — deliberately excludes a same-labeled but distinct
+  // chunk elsewhere in the document (e.g. a table-of-contents stub, a version-history
+  // table row reusing "1.1" to mean a revision number, not clause 1.1). A nonzero
+  // slack seems tempting for "nearly adjacent" continuations, but every genuine
+  // same-clause split observed in this codebase's actual chunking shares its starting
+  // page_number exactly (a chunk.ts quirk: a size-triggered split doesn't advance the
+  // tracked page), so it always overlaps directly — slack only ever risked bridging
+  // through an unrelated stub into a wrong, wider range (verified: a slack of even 1
+  // was enough to pull an unrelated version-history entry into a real clause's range
+  // by chaining through an intermediate contents-listing stub one page away).
   function expandClauseRange(
     base: { start: number; end: number },
     siblings: { page_number: number | null; page_end: number | null }[],
-    slack = 2
+    slack = 0
   ): { start: number; end: number } {
     let { start, end } = base;
     let changed = true;

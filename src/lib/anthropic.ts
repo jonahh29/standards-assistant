@@ -49,6 +49,98 @@ export async function askWithCitations(
   return textBlock?.type === "text" ? textBlock.text : "";
 }
 
+export interface DrawingImage {
+  data: Buffer;
+  mediaType: "image/png" | "image/jpeg";
+}
+
+const EXTRACTION_SYSTEM_PROMPT = `You are examining architectural drawing page(s) to identify elements worth checking against building Standards.
+List every distinct, checkable element you can actually read off the drawing — each as its own numbered line, with a short description AND the specific value or detail shown (dimensions, materials, counts, distances, etc).
+Only list what is actually legible or explicitly annotated on the drawing — never infer, assume, or guess a value that isn't shown. If a typical compliance-relevant detail (e.g. smoke alarm locations, stair dimensions, window sizes, wall setbacks, wet area waterproofing, balustrade heights, insulation) is not shown or annotated on this drawing, do not list it.
+Respond with ONLY a numbered list, one item per line — no preamble, no headers, no summary.`;
+
+/** Vision pass: looks at the rendered drawing page(s) and lists what's actually
+ * checkable on them. Returns one string per list item, in the order Claude wrote
+ * them — each becomes its own retrieval query in the caller. */
+export async function extractDrawingItems(images: DrawingImage[]): Promise<string[]> {
+  const response = await client.messages.create({
+    model: "claude-sonnet-5",
+    max_tokens: 2048,
+    system: EXTRACTION_SYSTEM_PROMPT,
+    messages: [
+      {
+        role: "user",
+        content: [
+          ...images.map((img) => ({
+            type: "image" as const,
+            source: {
+              type: "base64" as const,
+              media_type: img.mediaType,
+              data: img.data.toString("base64"),
+            },
+          })),
+          {
+            type: "text" as const,
+            text: "List the checkable compliance elements visible on this drawing.",
+          },
+        ],
+      },
+    ],
+  });
+
+  const textBlock = response.content.find((block) => block.type === "text");
+  const text = textBlock?.type === "text" ? textBlock.text : "";
+
+  return text
+    .split("\n")
+    .map((line) => line.replace(/^\s*\d+[.)]\s*/, "").trim())
+    .filter(Boolean);
+}
+
+export interface DrawingCheckItem {
+  description: string;
+  chunks: RetrievedChunk[];
+}
+
+const COMPLIANCE_SYSTEM_PROMPT = `You are Standards Assistant, helping an architect check a drawing against Australian Standards.
+You'll be given a list of elements observed on an architectural drawing, each with excerpts retrieved from the uploaded Standards that may apply.
+For each item: state plainly what the drawing shows, state what the applicable Standard requires — mentioning the specific clause number naturally in your own sentence (e.g. "clause 9.2.3 requires...") and naming any relevant diagram/table exactly as it appears in the excerpts (e.g. "Figure 9.2.3") so the application can display it automatically — then flag the item as one of: "Looks compliant", "Needs attention", or "Can't determine from the excerpts", with a short reason.
+This is a screening tool, not a certified compliance assessment — never state a definitive pass or fail; phrase every finding as something to verify against the cited source, not a final ruling.
+If no excerpt is actually relevant to an item, say so plainly and don't cite anything for it — never guess at a requirement that isn't in the excerpts.
+Write conversationally, one short section per item — not a dense formal report.
+You don't have image-display ability yourself, but the application does — never say you "can't display images"; just name the figure/table exactly and it will appear on its own.`;
+
+/** Synthesis pass: turns the extracted items (each with its own retrieved excerpts)
+ * into the final flagged report, following the same citation conventions as
+ * askWithCitations so figure highlighting on the compliance page works unmodified. */
+export async function buildComplianceReport(items: DrawingCheckItem[]): Promise<string> {
+  const context = items
+    .map((item, i) => {
+      const excerpts = item.chunks
+        .map((c) => {
+          const ref = c.clauseLabel
+            ? `clause ${c.clauseLabel}`
+            : c.pageNumber
+              ? `p.${c.pageNumber}`
+              : "unknown location";
+          return `[${c.documentTitle}, ${ref}]\n${c.content}`;
+        })
+        .join("\n\n");
+      return `Item ${i + 1}: ${item.description}\n\nRelevant excerpts:\n${excerpts || "(none found)"}`;
+    })
+    .join("\n\n---\n\n");
+
+  const response = await client.messages.create({
+    model: "claude-sonnet-5",
+    max_tokens: 4096,
+    system: COMPLIANCE_SYSTEM_PROMPT,
+    messages: [{ role: "user", content: context }],
+  });
+
+  const textBlock = response.content.find((block) => block.type === "text");
+  return textBlock?.type === "text" ? textBlock.text : "";
+}
+
 /** Short, scannable title for a favourited Q&A — a trivial summarization, so a cheap/fast model is fine here. */
 export async function generateFavouriteTitle(
   question: string,

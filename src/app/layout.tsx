@@ -66,12 +66,6 @@ export default async function RootLayout({
               >
                 Ask
               </Link>
-              <Link
-                href="/comply"
-                className="text-sm text-offwhite/80 hover:text-cyan"
-              >
-                Comply
-              </Link>
               <span className="ml-auto flex items-center gap-3 font-body">
                 <span className="text-sm text-offwhite/40">{user.email}</span>
                 <SignOutButton />

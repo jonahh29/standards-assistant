@@ -37,6 +37,26 @@ export async function POST(request: Request) {
 
   const supabase = getSupabaseServerClient();
 
+  try {
+    return await runComplianceCheck(supabase, storagePath, filename, filterIds);
+  } catch (err) {
+    // An uncaught error here would otherwise return Next's default HTML error page,
+    // which breaks the client's res.json() parse ("Unexpected end of JSON input")
+    // instead of showing the actual problem.
+    console.error("Compliance check failed:", err);
+    return Response.json(
+      { error: err instanceof Error ? err.message : "Something went wrong checking this drawing." },
+      { status: 500 }
+    );
+  }
+}
+
+async function runComplianceCheck(
+  supabase: ReturnType<typeof getSupabaseServerClient>,
+  storagePath: string,
+  filename: string,
+  filterIds: string[] | null
+): Promise<Response> {
   const { data: fileBlob, error: downloadError } = await supabase.storage
     .from("compliance-drawings")
     .download(storagePath);

@@ -8,6 +8,11 @@ const nextConfig: NextConfig = {
       "./node_modules/pdfjs-dist/standard_fonts/**",
       "./node_modules/pdfjs-dist/cmaps/**",
     ],
+    "/api/compliance/**": [
+      "./node_modules/pdfjs-dist/legacy/build/*.mjs",
+      "./node_modules/pdfjs-dist/standard_fonts/**",
+      "./node_modules/pdfjs-dist/cmaps/**",
+    ],
   },
 };
 

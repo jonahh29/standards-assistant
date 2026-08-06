@@ -28,16 +28,18 @@ const RENDER_SCALE = 1.5;
 // opening width" (some documents just don't use one). No "i" flag: the [A-Z]
 // lookahead in the no-colon branch must stay case-sensitive, or it matches any
 // letter and accepts lowercase sentence continuations as if they were captions.
-// \S{0,1} tolerates one stray non-whitespace artifact right after the number —
-// covers both a PDF font-encoding glitch (a Private Use Area glyph, confirmed on a
-// real page) and a second suffix letter the number pattern itself doesn't capture
-// (e.g. "13.3.2aa"). The negative lookahead excludes "summary of changes" style
-// rows that are structurally caption-like but aren't real captions, e.g. "Table
-// 2.2.3b Amended to reflect revised wind regions." or a duplicated self-reference
-// like "Figure 2 Figure 2 has been updated." — and [ \t] (not \s) keeps the
-// whitespace check same-line only, so it can't bleed into an unrelated next line.
+// [a-z]{0,2} (not just one letter) captures a double-letter suffix like "13.3.2aa"
+// as part of the actual label — it must be inside the capture group, not left for
+// the trailing \S{0,1} to swallow, or the stored label gets silently truncated to
+// "13.3.2a". \S{0,1} is only for a stray non-letter artifact right after the number
+// (a PDF font-encoding glitch — a Private Use Area glyph — confirmed on a real
+// page). The negative lookahead excludes "summary of changes" style rows that are
+// structurally caption-like but aren't real captions, e.g. "Table 2.2.3b Amended to
+// reflect revised wind regions." or a duplicated self-reference like "Figure 2
+// Figure 2 has been updated." — and [ \t] (not \s) keeps the whitespace check
+// same-line only, so it can't bleed into an unrelated following line.
 const LABEL_PATTERN =
-  /^\s*((?:Figure|Table)\s+\d+(?:\.\d+)*[a-z]?(?:\/[a-z])?)\S{0,1}(?:[ \t]*:|[ \t]+(?!(?:Amended|Added|Deleted|Updated|Revised|Removed|Changed|Renumbered|Has|Figure|Table)\b)(?=[A-Z]))/gm;
+  /^\s*((?:Figure|Table)\s+\d+(?:\.\d+)*[a-z]{0,2}(?:\/[a-z])?)\S{0,1}(?:[ \t]*:|[ \t]+(?!(?:Amended|Added|Deleted|Updated|Revised|Removed|Changed|Renumbered|Has|Figure|Table)\b)(?=[A-Z]))/gm;
 // A bare numbered clause header at the start of a line — mirrors chunk.ts's pattern,
 // used here only to detect where a table's continuation onto the next page ends.
 const CLAUSE_HEADER_PATTERN = /^\s*\d{1,2}(?:\.\d{1,3}){1,4}[a-z]?\s+\S/m;

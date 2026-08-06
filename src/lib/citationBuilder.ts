@@ -272,17 +272,21 @@ export async function buildCitations(params: {
   // (e.g. cited by page rather than by clause), while the clause the answer actually
   // walks through in depth gets referenced by name repeatedly. Counting how many
   // times each clause is actually named in the answer is a much more direct signal.
+  // When multiple clauses tie on mention count (e.g. several each mentioned exactly
+  // once), "most content" was also a poor tie-break - it can pick a clause that's
+  // only a brief aside near the end over the one the answer actually opens with and
+  // explains in depth. Whichever is named earliest in the answer is a much better
+  // signal of "the main subject", since answers here lead with their main point.
   const offeredClauseCandidate =
     citations
       .filter((c) => c.clauseLabel)
       .map((c) => {
-        const mentionCount = (
-          answer.match(new RegExp(`\\bclause\\s+${escapeRegex(c.clauseLabel!)}(?!\\.?\\d)`, "gi")) ?? []
-        ).length;
-        return { c, mentionCount };
+        const re = new RegExp(`\\bclause\\s+${escapeRegex(c.clauseLabel!)}(?!\\.?\\d)`, "gi");
+        const mentionCount = (answer.match(re) ?? []).length;
+        const firstIndex = answer.search(re);
+        return { c, mentionCount, firstIndex: firstIndex === -1 ? Infinity : firstIndex };
       })
-      .sort((a, b) => b.mentionCount - a.mentionCount || b.c.content.length - a.c.content.length)[0]
-      ?.c ?? null;
+      .sort((a, b) => b.mentionCount - a.mentionCount || a.firstIndex - b.firstIndex)[0]?.c ?? null;
 
   let offeredClause: OfferedClause | null = null;
 

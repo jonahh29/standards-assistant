@@ -30,6 +30,11 @@ export interface CitationMatch {
 const FIGURE_GROUP_PATTERN =
   /\b(Figures?|Tables?)\s+(\d+(?:\.\d+)*[a-z]?(?:\s*(?:,|and)\s*\d+(?:\.\d+)*[a-z]?)*)/g;
 const TOKEN_PATTERN = /\d+(?:\.\d+)*[a-z]?/g;
+// A lettered range like "Figures 6.2a–6.2g" or the abbreviated "Figures 6.2a–g" —
+// expanded into one highlighted mention per letter rather than leaving everything
+// after the dash as plain text, since none of those individual figures are
+// otherwise ever named on their own in the prose.
+const RANGE_PATTERN = /\b(Figures?|Tables?)\s+(\d+(?:\.\d+)*)([a-z])\s*[-–—]\s*(?:\2)?([a-z])\b/g;
 
 function findFigureForMention(
   citations: Citation[],
@@ -46,7 +51,10 @@ function findFigureForMention(
 interface RawMatch {
   index: number;
   length: number;
-  match: CitationMatch;
+  // Every raw match expands to one or more rendered parts — a single mention is
+  // just [CitationMatch], a comma list contributes one entry per raw match (each
+  // its own RawMatch), and a lettered range expands to many parts from one match.
+  parts: (string | CitationMatch)[];
 }
 
 /** Splits answer text into plain strings interleaved with recognized figure/table
@@ -59,6 +67,36 @@ export function splitTextWithCitations(
   if (citations.length === 0) return [text];
 
   const rawMatches: RawMatch[] = [];
+
+  for (const m of text.matchAll(RANGE_PATTERN)) {
+    const keyword = m[1];
+    const singular = keyword.replace(/s$/, "");
+    const base = m[2];
+    const startLetter = m[3];
+    const endLetter = m[4];
+    if (startLetter >= endLetter) continue;
+
+    const letterParts: (string | CitationMatch)[] = [];
+    for (let code = startLetter.charCodeAt(0); code <= endLetter.charCodeAt(0); code++) {
+      const letter = String.fromCharCode(code);
+      const token = `${base}${letter}`;
+      const found = findFigureForMention(citations, `${singular} ${token}`);
+      if (letterParts.length > 0) {
+        letterParts.push(code === endLetter.charCodeAt(0) ? " and " : ", ");
+      }
+      letterParts.push(
+        found
+          ? { kind: "figure" as const, text: `${singular} ${token}`, citation: found.citation, figure: found.figure }
+          : `${singular} ${token}`
+      );
+    }
+
+    // Only expand if at least one letter actually resolved to a real figure —
+    // otherwise leave the original range text untouched as plain prose.
+    if (letterParts.some((p) => typeof p !== "string")) {
+      rawMatches.push({ index: m.index!, length: m[0].length, parts: letterParts });
+    }
+  }
 
   for (const m of text.matchAll(FIGURE_GROUP_PATTERN)) {
     const keyword = m[1];
@@ -77,12 +115,9 @@ export function splitTextWithCitations(
         rawMatches.push({
           index: m.index!,
           length: keyword.length + 1 + token.length,
-          match: {
-            kind: "figure",
-            text: `${keyword} ${token}`,
-            citation: found.citation,
-            figure: found.figure,
-          },
+          parts: [
+            { kind: "figure", text: `${keyword} ${token}`, citation: found.citation, figure: found.figure },
+          ],
         });
       } else {
         // A later item in a list ("...6.3.9b and 6.3.9c") doesn't repeat the keyword
@@ -90,7 +125,7 @@ export function splitTextWithCitations(
         rawMatches.push({
           index: listStart + tok.index!,
           length: token.length,
-          match: { kind: "figure", text: token, citation: found.citation, figure: found.figure },
+          parts: [{ kind: "figure", text: token, citation: found.citation, figure: found.figure }],
         });
       }
     });
@@ -111,7 +146,7 @@ export function splitTextWithCitations(
   let lastIndex = 0;
   for (const rm of filtered) {
     if (rm.index > lastIndex) parts.push(text.slice(lastIndex, rm.index));
-    parts.push(rm.match);
+    parts.push(...rm.parts);
     lastIndex = rm.index + rm.length;
   }
   if (lastIndex < text.length) parts.push(text.slice(lastIndex));

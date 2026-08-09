@@ -35,6 +35,17 @@ const TOKEN_PATTERN = /\d+(?:\.\d+)*[a-z]?/g;
 // after the dash as plain text, since none of those individual figures are
 // otherwise ever named on their own in the prose.
 const RANGE_PATTERN = /\b(Figures?|Tables?)\s+(\d+(?:\.\d+)*)([a-z])\s*[-–—]\s*(?:\2)?([a-z])\b/g;
+// Catches a bare sub-figure reference with no "Figure"/"Table" keyword nearby at
+// all — e.g. "...shown in Figures 6.2a or 6.2b for bath walls, 6.2c or 6.2d for
+// shower walls..." only "6.2a" gets a keyword; everything after is bare numbers
+// scattered through unrelated descriptive text between them, not a clean list or
+// range either pattern above can parse. A dotted number with a lettered suffix
+// (e.g. "6.2a", "9.2.5b") is essentially never anything other than a figure/table
+// sub-reference in this corpus — clause numbers here don't take a directly-attached
+// trailing letter — and it only ever renders as a link if it actually resolves
+// against a real figure, so an unrelated coincidental match (a measurement like
+// "3.5m") is harmless unless a figure with that exact label genuinely exists too.
+const BARE_LETTERED_PATTERN = /\b\d+(?:\.\d+)+[a-z]{1,2}\b/g;
 
 function findFigureForMention(
   citations: Citation[],
@@ -128,6 +139,17 @@ export function splitTextWithCitations(
           parts: [{ kind: "figure", text: token, citation: found.citation, figure: found.figure }],
         });
       }
+    });
+  }
+
+  for (const m of text.matchAll(BARE_LETTERED_PATTERN)) {
+    const token = m[0];
+    const found = findFigureForMention(citations, token);
+    if (!found) continue;
+    rawMatches.push({
+      index: m.index!,
+      length: token.length,
+      parts: [{ kind: "figure", text: token, citation: found.citation, figure: found.figure }],
     });
   }
 

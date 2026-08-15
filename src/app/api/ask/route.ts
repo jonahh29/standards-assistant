@@ -6,9 +6,20 @@ import { buildCitations, type MatchRow } from "@/lib/citationBuilder";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const CHUNKS_PER_DOCUMENT = 20;
+const CHUNKS_PER_DOCUMENT = 30;
 const MAX_DOCUMENTS = 6;
 const CLAUSE_PATTERN = /\b\d{1,2}(?:\.\d{1,3}){1,4}[a-z]?\b/g;
+// Explanatory notes commonly point elsewhere for the actual figure, e.g. "Part 10.3
+// contains the required height for a ceiling above a stairway..." — that note can
+// rank well (it's specifically about stairways) while the clause it points to ranks
+// far lower on its own (it's about room heights generally, stairways are just one
+// bullet among several). Following an explicit reference like this directly is more
+// reliable than hoping the target clause also ranks highly by raw similarity.
+const CROSS_REF_PATTERN = /\b(?:Part|[Cc]lause)\s+(\d+(?:\.\d+)*)\b/g;
+// Bounded to the highest-ranked excerpts and to a handful of distinct references so
+// one chunk that happens to mention many numbers in passing can't balloon retrieval.
+const CROSS_REF_SOURCE_LIMIT = 8;
+const CROSS_REF_TARGET_LIMIT = 5;
 
 export async function POST(request: Request) {
   const { question, documentIds: filterDocumentIds } = await request.json();
@@ -53,9 +64,31 @@ export async function POST(request: Request) {
     exactMatches = data ?? [];
   }
 
+  // Follow an explicit "Part X" / "clause X" reference made inside one of the
+  // top-ranked excerpts themselves, even if that target clause doesn't rank highly
+  // on its own for this question's wording.
+  const crossRefNumbers = [
+    ...new Set(
+      (vectorMatches ?? [])
+        .slice(0, CROSS_REF_SOURCE_LIMIT)
+        .flatMap((m: MatchRow) => [...m.content.matchAll(CROSS_REF_PATTERN)].map((cm) => cm[1]))
+    ),
+  ].slice(0, CROSS_REF_TARGET_LIMIT);
+
+  let crossRefMatches: MatchRow[] = [];
+  if (crossRefNumbers.length > 0) {
+    let query = supabase
+      .from("document_chunks")
+      .select("id, document_id, content, page_number, page_end, clause_label")
+      .or(crossRefNumbers.map((c) => `clause_label.ilike.${c}%`).join(","));
+    if (filterIds) query = query.in("document_id", filterIds);
+    const { data } = await query;
+    crossRefMatches = data ?? [];
+  }
+
   const seen = new Set<string>();
   const matches: MatchRow[] = [];
-  for (const row of [...(vectorMatches ?? []), ...exactMatches]) {
+  for (const row of [...(vectorMatches ?? []), ...exactMatches, ...crossRefMatches]) {
     if (seen.has(row.id)) continue;
     seen.add(row.id);
     matches.push(row);

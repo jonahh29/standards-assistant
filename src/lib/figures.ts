@@ -72,13 +72,15 @@ const MAX_CONTINUATION_PAGES = 2;
 
 /** Pure text-based caption detection — no rendering. Returns pages that have at least
  * one "Figure X.Y:" / "Table X.Y:" caption, plus up to MAX_CONTINUATION_PAGES pages
- * immediately after a Table caption that look like a continuation of that same table
- * (no new caption and no new clause header on them) — tables with many rows commonly
- * spill onto a second page, unlike diagrams, which is why only "Table" captions (not
- * "Figure") get this check. */
+ * immediately after a caption that look like a continuation of it (no new caption and
+ * no new clause header on them). Originally Table-only (tables with many rows commonly
+ * spill onto a second page, unlike diagrams) — but a Figure's accompanying "Figure
+ * Notes" legend can spill onto a following page too even when the diagram itself
+ * doesn't (confirmed on a real page: Figure 10.3.1's lettered dimension key continues
+ * onto the next page with no caption of its own), so this now applies to both. */
 export function detectPageLabels(pages: string[]): PageLabels[] {
   const result: PageLabels[] = [];
-  let continuingTableLabels: string[] | null = null;
+  let continuingLabels: string[] | null = null;
   let continuationCount = 0;
 
   for (let pageNumber = 1; pageNumber <= pages.length; pageNumber++) {
@@ -87,23 +89,22 @@ export function detectPageLabels(pages: string[]): PageLabels[] {
 
     if (labels.length > 0) {
       result.push({ page: pageNumber, labels });
-      const tableLabels = labels.filter((l) => l.toLowerCase().startsWith("table"));
-      continuingTableLabels = tableLabels.length > 0 ? tableLabels : null;
+      continuingLabels = labels;
       continuationCount = 0;
       continue;
     }
 
     if (
-      continuingTableLabels &&
+      continuingLabels &&
       continuationCount < MAX_CONTINUATION_PAGES &&
       !hasNewClauseHeader(pageText)
     ) {
-      result.push({ page: pageNumber, labels: continuingTableLabels });
+      result.push({ page: pageNumber, labels: continuingLabels });
       continuationCount++;
       continue;
     }
 
-    continuingTableLabels = null;
+    continuingLabels = null;
     continuationCount = 0;
   }
 

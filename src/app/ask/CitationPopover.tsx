@@ -13,7 +13,13 @@ export function CitationPopover({
   onClose: () => void;
 }) {
   const [zoomed, setZoomed] = useState(false);
-  const figureToShow = figure ?? citation.figures[0];
+  // A figure's caption can continue onto a following page with no caption of its own
+  // (e.g. a long "Figure Notes" legend) — those continuation pages share the exact
+  // same label string, so grouping by label shows the whole figure, not just its
+  // first page.
+  const figuresToShow = figure
+    ? citation.figures.filter((f) => f.label === figure.label)
+    : citation.figures.slice(0, 1);
 
   return (
     <div
@@ -32,26 +38,29 @@ export function CitationPopover({
               ? ` — p.${citation.pageNumber}`
               : ""}
         </div>
-        {figureToShow && (
+        {figuresToShow.length > 0 && (
           <>
             <div
               className={
                 zoomed
-                  ? "max-h-[65vh] overflow-auto rounded border border-cyan/20"
-                  : "max-h-[65vh] overflow-hidden rounded border border-cyan/20"
+                  ? "flex flex-col gap-2 max-h-[65vh] overflow-auto rounded border border-cyan/20"
+                  : "flex flex-col gap-2 max-h-[65vh] overflow-hidden rounded border border-cyan/20"
               }
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={figureToShow.url}
-                alt={figureToShow.label ?? ""}
-                onClick={() => setZoomed((z) => !z)}
-                className={
-                  zoomed
-                    ? "w-auto max-w-none cursor-zoom-out"
-                    : "h-auto max-h-[65vh] w-full cursor-zoom-in object-contain"
-                }
-              />
+              {figuresToShow.map((f, i) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={f.storagePath ?? i}
+                  src={f.url}
+                  alt={f.label ?? ""}
+                  onClick={() => setZoomed((z) => !z)}
+                  className={
+                    zoomed
+                      ? "w-auto max-w-none cursor-zoom-out"
+                      : "h-auto max-h-[65vh] w-full cursor-zoom-in object-contain"
+                  }
+                />
+              ))}
             </div>
             <span className="font-mono text-xs text-offwhite/40">
               {zoomed ? "Click image to zoom out" : "Click image to zoom in"}

@@ -54,6 +54,26 @@ export async function POST(request: Request) {
       ? filterDocumentIds
       : null;
 
+  try {
+    return await runAsk(supabase, question, filterIds);
+  } catch (err) {
+    // An uncaught error here (e.g. Anthropic rejecting an invalid API key) would
+    // otherwise return Next's default HTML error page, which the client's
+    // res.json() can't parse — that silently killed the request client-side and
+    // left the UI stuck on "Searching..." forever instead of showing an error.
+    console.error("Ask failed:", err);
+    return Response.json(
+      { error: err instanceof Error ? err.message : "Something went wrong answering that." },
+      { status: 500 }
+    );
+  }
+}
+
+async function runAsk(
+  supabase: ReturnType<typeof getSupabaseServerClient>,
+  question: string,
+  filterIds: string[] | null
+): Promise<Response> {
   // Fetched once, upfront, independent of what the initial retrieval happens to
   // surface — a search_standards call mid-answer can discover a chunk from a
   // document the initial batch didn't touch at all, and it still needs a title.

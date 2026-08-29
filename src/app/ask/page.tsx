@@ -136,36 +136,48 @@ export default function AskPage() {
     setOfferedClause(null);
     setShowOfferedClause(false);
 
-    const res = await fetch("/api/ask", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        question,
-        documentIds: selectedIds.size > 0 ? [...selectedIds] : undefined,
-      }),
-    });
-    const json = await res.json();
+    // Wrapped in try/catch so any failure — a network error, or the server crashing
+    // and returning a non-JSON error page that res.json() can't parse — always ends
+    // in the "error" state instead of leaving status stuck on "loading" forever
+    // (which is exactly what happened when an invalid Anthropic API key made the
+    // server throw: the unhandled parse error here silently killed this function
+    // partway through, so setStatus("error") never ran and the button just said
+    // "Searching..." indefinitely).
+    try {
+      const res = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question,
+          documentIds: selectedIds.size > 0 ? [...selectedIds] : undefined,
+        }),
+      });
+      const json = await res.json();
 
-    if (!res.ok) {
+      if (!res.ok) {
+        setStatus("error");
+        setErrorMessage(json.error ?? "Something went wrong.");
+        return;
+      }
+
+      setAnswer(json.answer);
+      setCitations(json.citations ?? []);
+      setOfferedClause(json.offeredClause ?? null);
+      setStatus("idle");
+
+      // Save to history in the background — doesn't block the answer from showing,
+      // and a failure here shouldn't interrupt the user's flow.
+      fetch("/api/history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question, answer: json.answer, citations: json.citations ?? [] }),
+      }).then((res) => {
+        if (res.ok) setHistoryRefreshKey((k) => k + 1);
+      });
+    } catch {
       setStatus("error");
-      setErrorMessage(json.error ?? "Something went wrong.");
-      return;
+      setErrorMessage("Something went wrong reaching the server. Try again in a moment.");
     }
-
-    setAnswer(json.answer);
-    setCitations(json.citations ?? []);
-    setOfferedClause(json.offeredClause ?? null);
-    setStatus("idle");
-
-    // Save to history in the background — doesn't block the answer from showing,
-    // and a failure here shouldn't interrupt the user's flow.
-    fetch("/api/history", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, answer: json.answer, citations: json.citations ?? [] }),
-    }).then((res) => {
-      if (res.ok) setHistoryRefreshKey((k) => k + 1);
-    });
   }
 
   async function handleFavourite() {

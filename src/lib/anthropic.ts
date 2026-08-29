@@ -53,6 +53,12 @@ function formatExcerpts(chunks: RetrievedChunk[], startIndex: number): string {
 // A hard cap on how many extra searches one answer can trigger — bounds worst-case
 // latency/cost for a single question regardless of how the model behaves.
 const MAX_TOOL_CALLS = 3;
+// A genuinely empty answer string is falsy in the client's `{answer && (...)}`
+// check, so it silently renders nothing at all — no card, no error, the "Ask"
+// button just flips back with no visible sign anything went wrong. Guarantee the
+// user always sees something instead of a silent no-op.
+const FALLBACK_TEXT =
+  "I wasn't able to put together an answer for that one — try asking again, or rephrase the question.";
 
 /** Answers a question from an initial batch of excerpts, but lets Claude call
  * `search` for more when that batch genuinely doesn't cover the question — e.g. an
@@ -84,7 +90,8 @@ export async function askWithCitations(
 
     if (response.stop_reason !== "tool_use" || forceFinalAnswer) {
       const textBlock = response.content.find((block) => block.type === "text");
-      return textBlock?.type === "text" ? textBlock.text : "";
+      const text = textBlock?.type === "text" ? textBlock.text.trim() : "";
+      return text || FALLBACK_TEXT;
     }
 
     messages.push({ role: "assistant", content: response.content });
@@ -109,7 +116,7 @@ export async function askWithCitations(
     messages.push({ role: "user", content: toolResults });
   }
 
-  return "";
+  return FALLBACK_TEXT;
 }
 
 /** Short, scannable title for a favourited Q&A — a trivial summarization, so a cheap/fast model is fine here. */

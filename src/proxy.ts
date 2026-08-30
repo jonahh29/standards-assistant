@@ -7,7 +7,9 @@ function isAdminOnlyPath(pathname: string): boolean {
     pathname === "/api/documents/upload-url" ||
     pathname === "/api/documents/process" ||
     /^\/api\/documents\/[^/]+$/.test(pathname) ||
-    /^\/api\/documents\/[^/]+\/figures-batch$/.test(pathname)
+    /^\/api\/documents\/[^/]+\/figures-batch$/.test(pathname) ||
+    pathname === "/admin/users" ||
+    pathname.startsWith("/api/admin/")
   );
 }
 

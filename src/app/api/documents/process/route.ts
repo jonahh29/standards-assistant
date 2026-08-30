@@ -15,11 +15,17 @@ export async function POST(request: Request) {
     return Response.json({ error: "Admin access required." }, { status: 403 });
   }
 
-  const { title, filename, storagePath } = await request.json();
+  const { title, filename, storagePath, product } = await request.json();
 
   if (!title || !filename || !storagePath) {
     return Response.json(
       { error: "title, filename, and storagePath are required." },
+      { status: 400 }
+    );
+  }
+  if (product !== "residential" && product !== "commercial") {
+    return Response.json(
+      { error: "product must be 'residential' or 'commercial'." },
       { status: 400 }
     );
   }
@@ -33,6 +39,7 @@ export async function POST(request: Request) {
       filename,
       storage_path: storagePath,
       status: "processing",
+      product,
     })
     .select()
     .single();

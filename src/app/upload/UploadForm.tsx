@@ -8,6 +8,7 @@ export function UploadForm() {
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [product, setProduct] = useState<"residential" | "commercial">("residential");
   const [status, setStatus] = useState<"idle" | "uploading" | "processing" | "error">(
     "idle"
   );
@@ -47,6 +48,7 @@ export function UploadForm() {
           title,
           filename: file.name,
           storagePath: urlJson.storagePath,
+          product,
         }),
       });
       const processJson = await processRes.json();
@@ -79,6 +81,17 @@ export function UploadForm() {
           placeholder="AS 1684.2 — Residential timber-framed construction"
           required
         />
+      </label>
+      <label className="flex flex-col gap-1 text-sm">
+        Product
+        <select
+          value={product}
+          onChange={(e) => setProduct(e.target.value as "residential" | "commercial")}
+          className="rounded border border-cyan/30 bg-navy px-3 py-2 text-offwhite outline-none focus:border-cyan"
+        >
+          <option value="residential">Residential</option>
+          <option value="commercial">Commercial</option>
+        </select>
       </label>
       <label className="flex flex-col gap-1 text-sm">
         PDF file

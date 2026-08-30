@@ -2,6 +2,7 @@ import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { embedTexts } from "@/lib/voyage";
 import { askWithCitations, type RetrievedChunk } from "@/lib/anthropic";
 import { buildCitations, type MatchRow } from "@/lib/citationBuilder";
+import { getSessionUser, getAllowedProducts } from "@/lib/supabase-session";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -29,15 +30,14 @@ const CROSS_REF_TARGET_LIMIT = 5;
 async function exactClauseLookup(
   supabase: ReturnType<typeof getSupabaseServerClient>,
   clauseNumbers: string[],
-  filterIds: string[] | null
+  filterIds: string[]
 ): Promise<MatchRow[]> {
   if (clauseNumbers.length === 0) return [];
-  let query = supabase
+  const { data } = await supabase
     .from("document_chunks")
     .select("id, document_id, content, page_number, page_end, clause_label")
-    .or(clauseNumbers.map((c) => `clause_label.ilike.${c}%`).join(","));
-  if (filterIds) query = query.in("document_id", filterIds);
-  const { data } = await query;
+    .or(clauseNumbers.map((c) => `clause_label.ilike.${c}%`).join(","))
+    .in("document_id", filterIds);
   return data ?? [];
 }
 
@@ -49,10 +49,34 @@ export async function POST(request: Request) {
   }
 
   const supabase = getSupabaseServerClient();
-  const filterIds =
-    Array.isArray(filterDocumentIds) && filterDocumentIds.length > 0
-      ? filterDocumentIds
-      : null;
+
+  // Every document is scoped to a product (residential/commercial), and a user can
+  // only ever search what their account has been granted — this is the real
+  // enforcement, not just which checkboxes the client happens to show. Never trust
+  // the client-supplied documentIds filter on its own: intersect it with what this
+  // user is actually allowed, so a residential-only account can't be made to reach a
+  // commercial document id directly (e.g. via devtools).
+  const sessionUser = await getSessionUser();
+  const allowedProducts = getAllowedProducts(sessionUser);
+  const { data: allowedDocs } = await supabase
+    .from("documents")
+    .select("id")
+    .in("product", allowedProducts.length > 0 ? allowedProducts : ["__none__"]);
+  const allowedDocumentIds = (allowedDocs ?? []).map((d) => d.id as string);
+
+  if (allowedDocumentIds.length === 0) {
+    return Response.json({
+      answer:
+        "You don't have access to any documents yet — ask your admin to grant you access.",
+      citations: [],
+      offeredClause: null,
+    });
+  }
+
+  const requestedIds: string[] =
+    Array.isArray(filterDocumentIds) && filterDocumentIds.length > 0 ? filterDocumentIds : [];
+  const scopedRequestedIds = requestedIds.filter((id) => allowedDocumentIds.includes(id));
+  const filterIds = scopedRequestedIds.length > 0 ? scopedRequestedIds : allowedDocumentIds;
 
   try {
     return await runAsk(supabase, question, filterIds);
@@ -72,15 +96,17 @@ export async function POST(request: Request) {
 async function runAsk(
   supabase: ReturnType<typeof getSupabaseServerClient>,
   question: string,
-  filterIds: string[] | null
+  filterIds: string[]
 ): Promise<Response> {
   // Fetched once, upfront, independent of what the initial retrieval happens to
   // surface — a search_standards call mid-answer can discover a chunk from a
   // document the initial batch didn't touch at all, and it still needs a title.
-  const titleQuery = filterIds
-    ? supabase.from("documents").select("id, title").in("id", filterIds)
-    : supabase.from("documents").select("id, title");
-  const { data: allDocuments } = await titleQuery;
+  // Scoped to filterIds (already the caller's allowed-products set) so this never
+  // hands a document title from outside the user's access to Claude either.
+  const { data: allDocuments } = await supabase
+    .from("documents")
+    .select("id, title")
+    .in("id", filterIds);
   const titleById = new Map((allDocuments ?? []).map((d) => [d.id, d.title as string]));
   const docIdByTitle = new Map((allDocuments ?? []).map((d) => [d.title as string, d.id as string]));
 

@@ -1,4 +1,5 @@
 import { getSupabaseServerClient } from "@/lib/supabase-server";
+import { getSessionUser, getAllowedProducts } from "@/lib/supabase-session";
 import { FigureThumbnail } from "@/app/FigureThumbnail";
 
 export const dynamic = "force-dynamic";
@@ -13,9 +14,24 @@ export default async function DocumentPage({
 
   const { data: document } = await supabase
     .from("documents")
-    .select("id, title, status")
+    .select("id, title, status, product")
     .eq("id", id)
     .single();
+
+  // proxy.ts only checks that someone is logged in, not which product a specific
+  // document belongs to (it can't, for a dynamic route, without a DB lookup) — so
+  // this gallery needs its own access check, or a residential-only account could
+  // reach a commercial document's figures just by guessing/visiting its URL.
+  const allowedProducts = getAllowedProducts(await getSessionUser());
+  if (document && !allowedProducts.includes(document.product)) {
+    return (
+      <div className="flex flex-1 flex-col gap-4 px-6 py-10 max-w-3xl mx-auto w-full">
+        <p className="text-offwhite/60">
+          You don&apos;t have access to this document.
+        </p>
+      </div>
+    );
+  }
 
   const { data: figureRows } = await supabase
     .from("document_figures")

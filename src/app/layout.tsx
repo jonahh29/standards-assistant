@@ -66,6 +66,14 @@ export default async function RootLayout({
               >
                 Ask
               </Link>
+              {admin && (
+                <Link
+                  href="/admin/users"
+                  className="text-sm text-offwhite/80 hover:text-cyan"
+                >
+                  Users
+                </Link>
+              )}
               <span className="ml-auto flex items-center gap-3 font-body">
                 <span className="text-sm text-offwhite/40">{user.email}</span>
                 <SignOutButton />

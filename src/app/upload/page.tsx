@@ -10,7 +10,7 @@ export default async function UploadPage() {
   const { data: documents } = await supabase
     .from("documents")
     .select(
-      "id, title, filename, status, error_message, created_at, figures_status, figures_done, figures_total"
+      "id, title, filename, status, error_message, created_at, figures_status, figures_done, figures_total, product"
     )
     .order("created_at", { ascending: false });
 
@@ -30,7 +30,12 @@ export default async function UploadPage() {
                 key={doc.id}
                 className="flex items-center justify-between rounded border border-cyan/20 px-4 py-2"
               >
-                <DocumentActions documentId={doc.id} title={doc.title} />
+                <div className="flex items-center gap-2">
+                  <DocumentActions documentId={doc.id} title={doc.title} />
+                  <span className="font-mono text-xs text-offwhite/40">
+                    {doc.product === "commercial" ? "Commercial" : "Residential"}
+                  </span>
+                </div>
                 <div className="flex items-center gap-3">
                   {doc.status === "ready" && (
                     <FiguresProgress

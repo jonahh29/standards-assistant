@@ -2,7 +2,6 @@
 
 import { Fragment, cloneElement, isValidElement, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { FavouritesSidebar } from "./FavouritesSidebar";
 import { HistorySidebar } from "./HistorySidebar";
 import { CitationMark } from "./CitationMark";
@@ -12,7 +11,13 @@ import { splitTextWithCitations, type Citation } from "./citationMatching";
 interface DocOption {
   id: string;
   title: string;
+  product: "residential" | "commercial";
 }
+
+const PRODUCT_LABELS: Record<string, string> = {
+  residential: "Residential",
+  commercial: "Commercial",
+};
 
 interface OfferedClause {
   documentId: string;
@@ -74,12 +79,14 @@ export default function AskPage() {
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
   useEffect(() => {
-    const supabase = getSupabaseBrowserClient();
-    supabase
-      .from("documents")
-      .select("id, title")
-      .order("title")
-      .then(({ data }) => setAllDocs(data ?? []));
+    // Scoped server-side to this user's product access (residential/commercial) —
+    // see src/app/api/documents/route.ts. Deliberately not a direct client-side
+    // Supabase query: RLS's blanket "authenticated can read" policy on `documents`
+    // has no product awareness, so that path would list every document regardless
+    // of what this account is actually allowed to see.
+    fetch("/api/documents")
+      .then((res) => res.json())
+      .then((json) => setAllDocs(json.documents ?? []));
   }, []);
 
   const markdownComponents = {
@@ -212,6 +219,13 @@ export default function AskPage() {
         ? allDocs.find((d) => selectedIds.has(d.id))?.title ?? "1 document"
         : `${selectedIds.size} documents`;
 
+  // Grouped under a product sub-heading only when the user actually has more than
+  // one product's worth of documents to choose from — a single-product account just
+  // sees a flat list, unchanged from before.
+  const docGroups = ["residential", "commercial"]
+    .map((product): [string, DocOption[]] => [product, allDocs.filter((d) => d.product === product)])
+    .filter(([, docs]) => docs.length > 0);
+
   return (
     <div className="flex flex-1">
       <FavouritesSidebar
@@ -241,19 +255,28 @@ export default function AskPage() {
               Search in: {scopeLabel} {filterOpen ? "▴" : "▾"}
             </button>
             {filterOpen && (
-              <div className="mt-2 flex flex-col gap-1 rounded border border-cyan/20 p-3 max-h-48 overflow-y-auto">
+              <div className="mt-2 flex flex-col gap-2 rounded border border-cyan/20 p-3 max-h-48 overflow-y-auto">
                 {allDocs.length === 0 && (
-                  <span className="text-offwhite/40 text-xs">No documents uploaded yet.</span>
+                  <span className="text-offwhite/40 text-xs">No documents available to you yet.</span>
                 )}
-                {allDocs.map((doc) => (
-                  <label key={doc.id} className="flex items-center gap-2 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(doc.id)}
-                      onChange={() => toggleDoc(doc.id)}
-                    />
-                    {doc.title}
-                  </label>
+                {docGroups.map(([product, docs]) => (
+                  <div key={product} className="flex flex-col gap-1">
+                    {docGroups.length > 1 && (
+                      <span className="font-mono text-[10px] uppercase tracking-wide text-offwhite/40">
+                        {PRODUCT_LABELS[product] ?? product}
+                      </span>
+                    )}
+                    {docs.map((doc) => (
+                      <label key={doc.id} className="flex items-center gap-2 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(doc.id)}
+                          onChange={() => toggleDoc(doc.id)}
+                        />
+                        {doc.title}
+                      </label>
+                    ))}
+                  </div>
                 ))}
               </div>
             )}

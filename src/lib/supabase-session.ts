@@ -39,3 +39,14 @@ export async function getSessionUser(): Promise<User | null> {
 export function isAdmin(user: User | null): boolean {
   return user?.app_metadata?.role === "admin";
 }
+
+export type Product = "residential" | "commercial";
+
+/** Which document products a user can see/search. Admin always has full access
+ * regardless of their own `products` field, so promoting someone to admin never
+ * requires also remembering to grant them every product separately. */
+export function getAllowedProducts(user: User | null): Product[] {
+  if (isAdmin(user)) return ["residential", "commercial"];
+  const products = user?.app_metadata?.products;
+  return Array.isArray(products) ? (products as Product[]) : [];
+}

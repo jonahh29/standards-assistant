@@ -14,7 +14,10 @@ export const maxDuration = 120;
 // hoping a wider blind fetch happened to include the right thing.
 const CHUNKS_PER_DOCUMENT = 10;
 const MAX_DOCUMENTS = 6;
-const CLAUSE_PATTERN = /\b\d{1,2}(?:\.\d{1,3}){1,4}[a-z]?\b/g;
+// Matches both the decimal numbering the other three documents use (e.g. "9.2.3")
+// and NCC Volume One's letter-code format (e.g. "F5D2") — see chunk.ts's
+// CLAUSE_HEADER_PATTERN for the same pair of shapes used at chunking time.
+const CLAUSE_PATTERN = /\b(?:\d{1,2}(?:\.\d{1,3}){1,4}[a-z]?|[A-Z]\d+[A-Z]\d+)\b/g;
 // Explanatory notes commonly point elsewhere for the actual figure, e.g. "Part 10.3
 // contains the required height for a ceiling above a stairway..." — that note can
 // rank well (it's specifically about stairways) while the clause it points to ranks
@@ -23,7 +26,12 @@ const CLAUSE_PATTERN = /\b\d{1,2}(?:\.\d{1,3}){1,4}[a-z]?\b/g;
 // reliable than hoping the target clause also ranks highly by raw similarity. Kept
 // alongside the search tool since it's free (no extra Claude round-trip) and already
 // resolves some of these cases before Claude would even need to ask.
-const CROSS_REF_PATTERN = /\b(?:Part|[Cc]lause)\s+(\d+(?:\.\d+)*)\b/g;
+// Decimal numbers need the "Part"/"clause" prefix to avoid over-triggering on
+// random numbers, but NCC Volume One's letter-code format is distinctive enough
+// (and is routinely referenced bare, e.g. "complying with— F5D2; and") to follow
+// without requiring a prefix word at all.
+const CROSS_REF_PATTERN =
+  /\b(?:Part|[Cc]lause)\s+(\d+(?:\.\d+)*)\b|\b([A-Z]\d+[A-Z]\d+)\b/g;
 const CROSS_REF_SOURCE_LIMIT = 8;
 const CROSS_REF_TARGET_LIMIT = 5;
 
@@ -138,7 +146,9 @@ async function runAsk(
     ...new Set(
       (vectorMatches ?? [])
         .slice(0, CROSS_REF_SOURCE_LIMIT)
-        .flatMap((m: MatchRow) => [...m.content.matchAll(CROSS_REF_PATTERN)].map((cm) => cm[1]))
+        .flatMap((m: MatchRow) =>
+          [...m.content.matchAll(CROSS_REF_PATTERN)].map((cm) => cm[1] ?? cm[2])
+        )
     ),
   ].slice(0, CROSS_REF_TARGET_LIMIT) as string[];
   const crossRefMatches = await exactClauseLookup(supabase, crossRefNumbers, filterIds);

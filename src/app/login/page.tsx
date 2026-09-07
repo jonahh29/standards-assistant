@@ -4,6 +4,27 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
+// A try/catch alone can't help if the underlying request just never settles at
+// all (neither resolves nor rejects) — a genuinely stalled connection, which can
+// happen for minutes on a marginal mobile signal without ever throwing a normal
+// network error. Racing against a hard timeout guarantees the button always
+// resolves to something visible either way, instead of waiting indefinitely.
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("TIMEOUT")), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -16,13 +37,18 @@ export default function LoginPage() {
     setStatus("loading");
     setErrorMessage("");
 
-    // Wrapped in try/catch so any failure — a network hiccup, or a mobile browser
-    // throwing instead of returning a normal {error} (stricter cookie/storage
-    // handling than desktop can do this) — always ends in a visible error instead of
-    // leaving the button stuck on "Signing in..." forever with no explanation.
+    // Wrapped in try/catch (any failure, including a mobile browser throwing
+    // instead of returning a normal {error} — stricter cookie/storage handling
+    // than desktop can do this) plus a hard timeout (in case the request just
+    // stalls and never settles at all, which try/catch alone can't help with) —
+    // between the two, this can never leave the button stuck on "Signing in..."
+    // forever with no explanation.
     try {
       const supabase = getSupabaseBrowserClient();
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { error } = await withTimeout(
+        supabase.auth.signInWithPassword({ email, password }),
+        15000
+      );
 
       if (error) {
         setStatus("error");
@@ -32,9 +58,13 @@ export default function LoginPage() {
 
       router.push("/");
       router.refresh();
-    } catch {
+    } catch (err) {
       setStatus("error");
-      setErrorMessage("Something went wrong signing in. Try again in a moment.");
+      setErrorMessage(
+        err instanceof Error && err.message === "TIMEOUT"
+          ? "This is taking too long — check your connection and try again."
+          : "Something went wrong signing in. Try again in a moment."
+      );
     }
   }
 

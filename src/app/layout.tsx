@@ -41,7 +41,7 @@ export default async function RootLayout({
       className={`${spaceGrotesk.variable} ${ibmPlexSans.variable} ${ibmPlexMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-navy text-offwhite font-body">
-        <nav className="flex items-center gap-6 border-b border-cyan/20 px-6 py-4 font-heading">
+        <nav className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-cyan/20 px-4 py-4 font-heading sm:px-6">
           <span className="flex items-center gap-2 text-lg font-medium tracking-tight">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/logo-icon.svg" alt="ResiDraft" className="h-7 w-auto" />

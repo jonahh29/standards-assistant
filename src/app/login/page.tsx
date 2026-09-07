@@ -16,17 +16,26 @@ export default function LoginPage() {
     setStatus("loading");
     setErrorMessage("");
 
-    const supabase = getSupabaseBrowserClient();
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    // Wrapped in try/catch so any failure — a network hiccup, or a mobile browser
+    // throwing instead of returning a normal {error} (stricter cookie/storage
+    // handling than desktop can do this) — always ends in a visible error instead of
+    // leaving the button stuck on "Signing in..." forever with no explanation.
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
 
-    if (error) {
+      if (error) {
+        setStatus("error");
+        setErrorMessage(error.message);
+        return;
+      }
+
+      router.push("/");
+      router.refresh();
+    } catch {
       setStatus("error");
-      setErrorMessage(error.message);
-      return;
+      setErrorMessage("Something went wrong signing in. Try again in a moment.");
     }
-
-    router.push("/");
-    router.refresh();
   }
 
   return (

@@ -233,7 +233,10 @@ export default function AskPage() {
         onSelect={(data) => handleLoadSaved(data, true)}
       />
 
-      <div className="flex flex-1 flex-col gap-8 px-6 py-10 max-w-2xl mx-auto w-full">
+      {/* Extra bottom padding on mobile only, clearing the fixed Favourites/History
+          bar the two sidebar components render there (see FavouritesSidebar.tsx /
+          HistorySidebar.tsx) — not needed on md+ where that bar doesn't render. */}
+      <div className="flex flex-1 flex-col gap-8 px-6 pt-10 pb-24 md:pb-10 max-w-2xl mx-auto w-full">
         <h1 className="font-heading text-2xl font-semibold">Ask a question</h1>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">

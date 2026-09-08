@@ -68,5 +68,10 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.png).*)"],
+  // Excludes any request for a static file (by extension) in addition to the
+  // Next.js internals — not just today's known public/ files by name, so a new
+  // image/icon added to public/ later doesn't hit this same bug again.
+  matcher: [
+    "/((?!_next/static|_next/image|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+  ],
 };

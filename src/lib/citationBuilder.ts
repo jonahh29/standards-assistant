@@ -107,29 +107,39 @@ export async function buildCitations(params: {
     content: string;
     chunk_index: number;
   }
+  interface SiblingChunkRow extends SiblingChunk {
+    document_id: string;
+    clause_label: string | null;
+  }
+  // Independent of each other (one keys off citedClauseLabels, the other only off
+  // documentIds) — run concurrently rather than one after the other.
+  const [siblingChunksResult, figureRowsResult] = await Promise.all([
+    citedClauseLabels.length > 0
+      ? supabase
+          .from("document_chunks")
+          .select("document_id, clause_label, page_number, page_end, content, chunk_index")
+          .in("document_id", documentIds)
+          .in("clause_label", citedClauseLabels)
+      : Promise.resolve({ data: [] as SiblingChunkRow[] | null }),
+    supabase
+      .from("document_figures")
+      .select("document_id, page_number, storage_path, label")
+      .in("document_id", documentIds),
+  ]);
+
   const clauseChunksByDoc = new Map<string, SiblingChunk[]>();
-  if (citedClauseLabels.length > 0) {
-    const { data: siblingChunks } = await supabase
-      .from("document_chunks")
-      .select("document_id, clause_label, page_number, page_end, content, chunk_index")
-      .in("document_id", documentIds)
-      .in("clause_label", citedClauseLabels);
-    for (const row of siblingChunks ?? []) {
-      const key = `${row.document_id}:::${row.clause_label}`;
-      if (!clauseChunksByDoc.has(key)) clauseChunksByDoc.set(key, []);
-      clauseChunksByDoc.get(key)!.push({
-        page_number: row.page_number,
-        page_end: row.page_end,
-        content: row.content,
-        chunk_index: row.chunk_index,
-      });
-    }
+  for (const row of (siblingChunksResult.data ?? []) as SiblingChunkRow[]) {
+    const key = `${row.document_id}:::${row.clause_label}`;
+    if (!clauseChunksByDoc.has(key)) clauseChunksByDoc.set(key, []);
+    clauseChunksByDoc.get(key)!.push({
+      page_number: row.page_number,
+      page_end: row.page_end,
+      content: row.content,
+      chunk_index: row.chunk_index,
+    });
   }
 
-  const { data: figureRows } = await supabase
-    .from("document_figures")
-    .select("document_id, page_number, storage_path, label")
-    .in("document_id", documentIds);
+  const { data: figureRows } = figureRowsResult;
 
   const figuresByPage = new Map<string, { storage_path: string; label: string | null }[]>();
   // A table spanning multiple pages gets one document_figures row per page, all

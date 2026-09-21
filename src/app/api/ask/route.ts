@@ -35,10 +35,39 @@ const CROSS_REF_PATTERN =
 const CROSS_REF_SOURCE_LIMIT = 8;
 const CROSS_REF_TARGET_LIMIT = 5;
 
+// A raw `ilike '8.1%'` prefix match doesn't respect the dot as a segment
+// boundary — it also catches numeric siblings like "8.10"/"8.19" that just happen
+// to share the same leading characters as "8.1", not actual sub-clauses of it.
+// For a short, common prefix (which cross-references routinely are — "Part 2.2",
+// "clause 8.1") that fan-out was pulling in 2-3x the intended chunk count, which
+// directly bloated the prompt sent to Claude and was the single biggest driver of
+// slow answers (measured via scripts/profile-ask.mjs: one real question went from
+// 40 relevant chunks to 144 total, 120k input tokens, and a 12.6s model call). A
+// genuine match is: the clause itself, a dotted sub-clause (8.1.1), or a lettered
+// variant (8.1a) — never a numeric sibling (8.10). Filtering client-side (rather
+// than trying to express this as a single ilike/regex pattern) keeps the letter
+// case correct without fighting PostgREST's limited pattern syntax.
+function isGenuineClauseMatch(label: string, prefix: string, includeSubClauses: boolean): boolean {
+  if (label.toLowerCase() === prefix.toLowerCase()) return true;
+  if (!includeSubClauses) return false;
+  if (label.toLowerCase().startsWith(`${prefix.toLowerCase()}.`)) return true;
+  return label.length === prefix.length + 1 && /[a-z]/i.test(label[label.length - 1]);
+}
+
 async function exactClauseLookup(
   supabase: ReturnType<typeof getSupabaseServerClient>,
   clauseNumbers: string[],
-  filterIds: string[]
+  filterIds: string[],
+  // Sub-clause expansion (8.4 -> 8.4.1, 8.4.2, ...) makes sense when the *user*
+  // named a clause directly — they're asking about that whole area. It's wrong
+  // for a cross-reference merely mentioned inside another excerpt ("Part 8.4
+  // contains...") — that's a pointer to one specific clause, not an invitation to
+  // pull in its entire sub-tree. Measured live: expanding cross-references pulled
+  // in every sub-clause of a short, common number across every document sharing
+  // that numbering scheme — one real question ballooned from 40 relevant chunks
+  // to 144 (120k input tokens, a 12.6s model call) this way. Exact-match-only
+  // brought the same cross-references down to 2 rows.
+  includeSubClauses: boolean
 ): Promise<MatchRow[]> {
   if (clauseNumbers.length === 0) return [];
   const { data } = await supabase
@@ -46,7 +75,11 @@ async function exactClauseLookup(
     .select("id, document_id, content, page_number, page_end, clause_label")
     .or(clauseNumbers.map((c) => `clause_label.ilike.${c}%`).join(","))
     .in("document_id", filterIds);
-  return data ?? [];
+  return (data ?? []).filter(
+    (row) =>
+      row.clause_label &&
+      clauseNumbers.some((c) => isGenuineClauseMatch(row.clause_label!, c, includeSubClauses))
+  );
 }
 
 export async function POST(request: Request) {
@@ -66,9 +99,12 @@ export async function POST(request: Request) {
   // commercial document id directly (e.g. via devtools).
   const sessionUser = await getSessionUser();
   const allowedProducts = getAllowedProducts(sessionUser);
+  // Selects title here too and hands it straight to runAsk — it used to only
+  // select `id` and let runAsk query `documents` a second time for titles, which
+  // was a fully redundant extra round trip to the same table on every question.
   const { data: allowedDocs } = await supabase
     .from("documents")
-    .select("id")
+    .select("id, title")
     .in("product", allowedProducts.length > 0 ? allowedProducts : ["__none__"]);
   const allowedDocumentIds = (allowedDocs ?? []).map((d) => d.id as string);
 
@@ -86,8 +122,15 @@ export async function POST(request: Request) {
   const scopedRequestedIds = requestedIds.filter((id) => allowedDocumentIds.includes(id));
   const filterIds = scopedRequestedIds.length > 0 ? scopedRequestedIds : allowedDocumentIds;
 
+  // Built from allowedDocs (a superset of filterIds) rather than re-querying —
+  // covers every id runAsk could possibly need to look up a title for.
+  const titleById = new Map((allowedDocs ?? []).map((d) => [d.id as string, d.title as string]));
+  const docIdByTitle = new Map(
+    (allowedDocs ?? []).map((d) => [d.title as string, d.id as string])
+  );
+
   try {
-    return await runAsk(supabase, question, filterIds);
+    return await runAsk(supabase, question, filterIds, titleById, docIdByTitle);
   } catch (err) {
     // An uncaught error here (e.g. Anthropic rejecting an invalid API key) would
     // otherwise return Next's default HTML error page, which the client's
@@ -104,21 +147,19 @@ export async function POST(request: Request) {
 async function runAsk(
   supabase: ReturnType<typeof getSupabaseServerClient>,
   question: string,
-  filterIds: string[]
+  filterIds: string[],
+  titleById: Map<string, string>,
+  docIdByTitle: Map<string, string>
 ): Promise<Response> {
-  // Fetched once, upfront, independent of what the initial retrieval happens to
-  // surface — a search_standards call mid-answer can discover a chunk from a
-  // document the initial batch didn't touch at all, and it still needs a title.
-  // Scoped to filterIds (already the caller's allowed-products set) so this never
-  // hands a document title from outside the user's access to Claude either.
-  const { data: allDocuments } = await supabase
-    .from("documents")
-    .select("id, title")
-    .in("id", filterIds);
-  const titleById = new Map((allDocuments ?? []).map((d) => [d.id, d.title as string]));
-  const docIdByTitle = new Map((allDocuments ?? []).map((d) => [d.title as string, d.id as string]));
-
-  const [questionEmbedding] = await embedTexts([question]);
+  // Guarantee any clause number the user names explicitly is included, even if it
+  // didn't rank in the top vector matches. Only depends on the raw question text,
+  // not on the embedding or vector search results, so it runs concurrently with
+  // them instead of after — one fewer round trip in the critical path.
+  const clauseNumbers = [...new Set(question.match(CLAUSE_PATTERN) ?? [])] as string[];
+  const [[questionEmbedding], exactMatches] = await Promise.all([
+    embedTexts([question]),
+    exactClauseLookup(supabase, clauseNumbers, filterIds, true),
+  ]);
 
   const { data: vectorMatches, error: matchError } = await supabase.rpc(
     "match_document_chunks_diverse",
@@ -134,11 +175,6 @@ async function runAsk(
     return Response.json({ error: matchError.message }, { status: 500 });
   }
 
-  // Guarantee any clause number the user names explicitly is included, even if it
-  // didn't rank in the top vector matches.
-  const clauseNumbers = [...new Set(question.match(CLAUSE_PATTERN) ?? [])] as string[];
-  const exactMatches = await exactClauseLookup(supabase, clauseNumbers, filterIds);
-
   // Follow an explicit "Part X" / "clause X" reference made inside one of the
   // top-ranked excerpts themselves, even if that target clause doesn't rank highly
   // on its own for this question's wording.
@@ -151,7 +187,7 @@ async function runAsk(
         )
     ),
   ].slice(0, CROSS_REF_TARGET_LIMIT) as string[];
-  const crossRefMatches = await exactClauseLookup(supabase, crossRefNumbers, filterIds);
+  const crossRefMatches = await exactClauseLookup(supabase, crossRefNumbers, filterIds, false);
 
   const seen = new Set<string>();
   const matches: MatchRow[] = [];
@@ -189,7 +225,7 @@ async function runAsk(
     });
 
     const queryClauseNumbers = [...new Set(query.match(CLAUSE_PATTERN) ?? [])] as string[];
-    const freshExactMatches = await exactClauseLookup(supabase, queryClauseNumbers, filterIds);
+    const freshExactMatches = await exactClauseLookup(supabase, queryClauseNumbers, filterIds, true);
 
     const fresh: MatchRow[] = [];
     for (const row of [...(freshVectorMatches ?? []), ...freshExactMatches]) {

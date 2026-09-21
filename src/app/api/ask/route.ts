@@ -82,6 +82,40 @@ async function exactClauseLookup(
   );
 }
 
+// --- Streaming response plumbing -------------------------------------------
+//
+// The client always gets a text/event-stream response now (even the early-exit
+// "no access"/"no documents" cases below, wrapped as a single immediate "done"
+// event) so it only ever needs one code path to parse a response, rather than
+// sometimes-JSON-sometimes-stream. Each line is `data: <json>\n\n`:
+//   {type:"delta", text}                        — append to the answer being shown
+//   {type:"reset"}                               — discard what's been shown so far;
+//                                                   it was tool-call preamble, not
+//                                                   the real answer (rare)
+//   {type:"done", answer, citations, offeredClause} — final state, stop loading
+//   {type:"error", message}                      — something failed
+//
+// Citations/figures are only ever computed from the complete final answer text
+// (buildCitations runs once, after askWithCitations resolves) — exactly the same
+// as the non-streaming version this replaced. Streaming only changes *when* the
+// growing answer text reaches the client, never how citations are derived from
+// it, which is what broke last time this was attempted.
+function sseEvent(data: unknown): Uint8Array {
+  return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+function immediateStreamResponse(answer: string): Response {
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(sseEvent({ type: "done", answer, citations: [], offeredClause: null }));
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+  });
+}
+
 export async function POST(request: Request) {
   const { question, documentIds: filterDocumentIds } = await request.json();
 
@@ -109,12 +143,9 @@ export async function POST(request: Request) {
   const allowedDocumentIds = (allowedDocs ?? []).map((d) => d.id as string);
 
   if (allowedDocumentIds.length === 0) {
-    return Response.json({
-      answer:
-        "You don't have access to any documents yet — ask your admin to grant you access.",
-      citations: [],
-      offeredClause: null,
-    });
+    return immediateStreamResponse(
+      "You don't have access to any documents yet — ask your admin to grant you access."
+    );
   }
 
   const requestedIds: string[] =
@@ -129,19 +160,7 @@ export async function POST(request: Request) {
     (allowedDocs ?? []).map((d) => [d.title as string, d.id as string])
   );
 
-  try {
-    return await runAsk(supabase, question, filterIds, titleById, docIdByTitle);
-  } catch (err) {
-    // An uncaught error here (e.g. Anthropic rejecting an invalid API key) would
-    // otherwise return Next's default HTML error page, which the client's
-    // res.json() can't parse — that silently killed the request client-side and
-    // left the UI stuck on "Searching..." forever instead of showing an error.
-    console.error("Ask failed:", err);
-    return Response.json(
-      { error: err instanceof Error ? err.message : "Something went wrong answering that." },
-      { status: 500 }
-    );
-  }
+  return runAsk(supabase, question, filterIds, titleById, docIdByTitle);
 }
 
 async function runAsk(
@@ -172,7 +191,13 @@ async function runAsk(
   );
 
   if (matchError) {
-    return Response.json({ error: matchError.message }, { status: 500 });
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(sseEvent({ type: "error", message: matchError.message }));
+        controller.close();
+      },
+    });
+    return new Response(stream, { headers: { "Content-Type": "text/event-stream" } });
   }
 
   // Follow an explicit "Part X" / "clause X" reference made inside one of the
@@ -198,11 +223,7 @@ async function runAsk(
   }
 
   if (matches.length === 0) {
-    return Response.json({
-      answer: "No documents have been uploaded yet, so there's nothing to search.",
-      citations: [],
-      offeredClause: null,
-    });
+    return immediateStreamResponse("No documents have been uploaded yet, so there's nothing to search.");
   }
 
   const toRetrievedChunk = (m: MatchRow): RetrievedChunk => ({
@@ -238,20 +259,47 @@ async function runAsk(
     return fresh.map(toRetrievedChunk);
   }
 
-  const answer = await askWithCitations(question, matches.map(toRetrievedChunk), search);
+  const stream = new ReadableStream({
+    async start(controller) {
+      try {
+        const answer = await askWithCitations(question, matches.map(toRetrievedChunk), search, {
+          onDelta: (text) => controller.enqueue(sseEvent({ type: "delta", text })),
+          onReset: () => controller.enqueue(sseEvent({ type: "reset" })),
+        });
 
-  // `matches` may have grown since the initial batch if search_standards was
-  // called — recomputed after the answer so citations reflect everything actually
-  // available to Claude, not just what was retrieved upfront.
-  const documentIds = [...new Set(matches.map((m) => m.document_id))];
+        // `matches` may have grown since the initial batch if search_standards was
+        // called — recomputed after the answer so citations reflect everything
+        // actually available to Claude, not just what was retrieved upfront.
+        const documentIds = [...new Set(matches.map((m) => m.document_id))];
 
-  const { citations, offeredClause } = await buildCitations({
-    matches,
-    answer,
-    documentIds,
-    titleById,
-    docIdByTitle,
+        const { citations, offeredClause } = await buildCitations({
+          matches,
+          answer,
+          documentIds,
+          titleById,
+          docIdByTitle,
+        });
+
+        controller.enqueue(sseEvent({ type: "done", answer, citations, offeredClause }));
+      } catch (err) {
+        // Mirrors the non-streaming version's top-level try/catch — an uncaught
+        // error here (e.g. Anthropic rejecting an invalid API key) must not just
+        // kill the stream silently; the client needs an explicit error event to
+        // leave "Searching..." and show something instead of hanging forever.
+        console.error("Ask failed:", err);
+        controller.enqueue(
+          sseEvent({
+            type: "error",
+            message: err instanceof Error ? err.message : "Something went wrong answering that.",
+          })
+        );
+      } finally {
+        controller.close();
+      }
+    },
   });
 
-  return Response.json({ answer, citations, offeredClause });
+  return new Response(stream, {
+    headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+  });
 }

@@ -143,13 +143,11 @@ export default function AskPage() {
     setOfferedClause(null);
     setShowOfferedClause(false);
 
-    // Wrapped in try/catch so any failure — a network error, or the server crashing
-    // and returning a non-JSON error page that res.json() can't parse — always ends
-    // in the "error" state instead of leaving status stuck on "loading" forever
-    // (which is exactly what happened when an invalid Anthropic API key made the
-    // server throw: the unhandled parse error here silently killed this function
-    // partway through, so setStatus("error") never ran and the button just said
-    // "Searching..." indefinitely).
+    // Wrapped in try/catch so any failure — a network error, a mid-stream drop, or
+    // the server crashing before it can even open the stream — always ends in the
+    // "error" state instead of leaving status stuck on "loading" forever (which is
+    // exactly what happened once before when an unhandled parse error silently
+    // killed this function partway through).
     try {
       const res = await fetch("/api/ask", {
         method: "POST",
@@ -159,17 +157,81 @@ export default function AskPage() {
           documentIds: selectedIds.size > 0 ? [...selectedIds] : undefined,
         }),
       });
-      const json = await res.json();
 
+      // A non-2xx here is always plain JSON, not the event stream (auth failures
+      // from middleware, or the "question is required" validation in the route
+      // itself — both fail before any stream is opened).
       if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
         setStatus("error");
         setErrorMessage(json.error ?? "Something went wrong.");
         return;
       }
 
-      setAnswer(json.answer);
-      setCitations(json.citations ?? []);
-      setOfferedClause(json.offeredClause ?? null);
+      if (!res.body) {
+        setStatus("error");
+        setErrorMessage("Something went wrong reaching the server. Try again in a moment.");
+        return;
+      }
+
+      // The route streams the answer as it's generated (src/app/api/ask/route.ts)
+      // so it appears live instead of all at once after the full ~10s round trip.
+      // Citations/figures only ever come from the "done" event at the end — they're
+      // derived from the complete answer text server-side, never computed from a
+      // partial stream, so highlighting only "pops in" once the answer is finished
+      // and settled, exactly as before streaming existed.
+      let accumulated = "";
+      let finalCitations: Citation[] = [];
+      let finalOfferedClause: OfferedClause | null = null;
+      let streamError = "";
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? ""; // a trailing partial event stays buffered
+
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith("data: ")) continue;
+          const event = JSON.parse(line.slice("data: ".length));
+
+          if (event.type === "delta") {
+            accumulated += event.text;
+            setAnswer(accumulated);
+          } else if (event.type === "reset") {
+            // The call that had been streaming turned out to be a search_standards
+            // call, not the final answer — none of what was shown was real. Clear
+            // it and keep showing the loading state until the next call's deltas
+            // arrive (rare: only when Claude writes something before deciding to
+            // search, which the system prompt asks it not to do).
+            accumulated = "";
+            setAnswer(null);
+          } else if (event.type === "done") {
+            accumulated = event.answer;
+            finalCitations = event.citations ?? [];
+            finalOfferedClause = event.offeredClause ?? null;
+            setAnswer(accumulated);
+            setCitations(finalCitations);
+            setOfferedClause(finalOfferedClause);
+          } else if (event.type === "error") {
+            streamError = event.message;
+          }
+        }
+      }
+
+      if (streamError) {
+        setStatus("error");
+        setErrorMessage(streamError);
+        return;
+      }
+
       setStatus("idle");
 
       // Save to history in the background — doesn't block the answer from showing,
@@ -177,7 +239,7 @@ export default function AskPage() {
       fetch("/api/history", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, answer: json.answer, citations: json.citations ?? [] }),
+        body: JSON.stringify({ question, answer: accumulated, citations: finalCitations }),
       }).then((res) => {
         if (res.ok) setHistoryRefreshKey((k) => k + 1);
       });

@@ -126,6 +126,7 @@ The excerpts may come from several different Standards documents at once — whe
 You have a search_standards tool. The excerpts you start with are usually enough, but call it when they genuinely aren't — most importantly when an excerpt explicitly points elsewhere (e.g. "Part 10.3 contains the required height...") and that target wasn't provided, or when you need a specific clause/figure/table that clearly exists in these Standards but isn't in front of you. Only say the excerpts don't cover something after you've actually tried searching for it. Don't call the tool out of routine caution when what you already have clearly answers the question — every call costs real time, so use it deliberately, not reflexively.
 If, even after searching, the material genuinely doesn't cover the question, say so plainly instead of guessing.
 Write conversationally by default — like a knowledgeable colleague explaining it plainly — rather than a dense formal report with heavy headers and bullet-point-per-clause structure. Only switch to a fuller, more formal/exhaustive breakdown when the question itself asks for that (e.g. "give me the full clause text" or "list every requirement in section 9.5").
+Keep answers tight by default: lead with the direct answer in the first sentence or two, then include only the supporting detail (a key dimension, an exception, a genuinely relevant related requirement) actually needed to apply it. Don't restate background context, cover cases the question didn't raise, or pad with extra caveats just to sound thorough — every sentence should earn its place. Expand into a fuller, more exhaustive answer only when the question explicitly calls for that (e.g. "give me the full clause text," "list every requirement in section 9.5," "explain in detail").
 State answers directly and assertively — say what the requirement IS, not that you're "reporting on what the excerpts say". Never preface an answer with meta-commentary about your sources, e.g. "Based on the excerpts provided," "According to the provided material," "The excerpts indicate," or similar — that framing reads as hedging. Only flag uncertainty plainly on the rare occasion the material genuinely doesn't cover the question — don't hedge routine, well-supported answers.`;
 
 const SEARCH_TOOL = {
@@ -155,12 +156,17 @@ function formatExcerpts(chunks, startIndex) {
 const userContent = `Excerpts:\n\n${formatExcerpts(matches, 0)}\n\nQuestion: ${question}`;
 console.log(`  prompt size: ~${userContent.length} chars (~${Math.round(userContent.length / 4)} tokens, rough estimate)\n`);
 
+const model = process.env.PROFILE_MODEL || "claude-sonnet-5";
+const effort = process.env.PROFILE_EFFORT || "high";
+console.log(`  model: ${model}, effort: ${effort}`);
 t = Date.now();
 const response = await anthropic.messages.create({
-  model: "claude-sonnet-5",
-  max_tokens: 2048,
+  model,
+  max_tokens: 8000,
   system: SYSTEM_PROMPT,
   tools: [SEARCH_TOOL],
+  thinking: { type: "adaptive" },
+  output_config: { effort },
   messages: [{ role: "user", content: userContent }],
 });
 t = mark(`Claude call (stop_reason=${response.stop_reason})`, t);
@@ -170,12 +176,17 @@ console.log(
       ? ` cache_read=${response.usage.cache_read_input_tokens}`
       : " (no prompt caching in use)")
 );
+console.log(`  content blocks: ${response.content.map((b) => b.type).join(", ")}`);
+const thinkingBlock = response.content.find((b) => b.type === "thinking");
+if (thinkingBlock) {
+  console.log(`  thinking length: ${thinkingBlock.thinking?.length ?? 0} chars`);
+}
 
 if (response.stop_reason === "tool_use") {
   console.log(`  -> Claude wants to call search_standards — this would trigger a SECOND full round trip in production (embed + vector search + another Claude call), adding to total latency.`);
 } else {
   const textBlock = response.content.find((b) => b.type === "text");
-  console.log(`\n  answer preview: ${(textBlock?.text ?? "").slice(0, 150)}...`);
+  console.log(`\n  full answer:\n${textBlock?.text ?? ""}`);
 }
 
 mark("\nTOTAL", overallStart);

@@ -3,12 +3,20 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import {
+  COUNCIL_LABELS,
+  INSTRUMENT_LABELS,
+  type Council,
+  type Instrument,
+} from "@/lib/instruments";
 
 export function UploadForm() {
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [product, setProduct] = useState<"residential" | "commercial">("residential");
+  const [instrument, setInstrument] = useState<Instrument>("ncc");
+  const [council, setCouncil] = useState<Council>("brisbane");
   const [status, setStatus] = useState<"idle" | "uploading" | "processing" | "error">(
     "idle"
   );
@@ -49,6 +57,8 @@ export function UploadForm() {
           filename: file.name,
           storagePath: urlJson.storagePath,
           product,
+          instrument,
+          council: instrument === "council_scheme" ? council : undefined,
         }),
       });
       const processJson = await processRes.json();
@@ -93,6 +103,36 @@ export function UploadForm() {
           <option value="commercial">Commercial</option>
         </select>
       </label>
+      <label className="flex flex-col gap-1 text-sm">
+        Instrument
+        <select
+          value={instrument}
+          onChange={(e) => setInstrument(e.target.value as Instrument)}
+          className="rounded border border-cyan/30 bg-navy px-3 py-2 text-offwhite outline-none focus:border-cyan"
+        >
+          {Object.entries(INSTRUMENT_LABELS).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+      {instrument === "council_scheme" && (
+        <label className="flex flex-col gap-1 text-sm">
+          Council
+          <select
+            value={council}
+            onChange={(e) => setCouncil(e.target.value as Council)}
+            className="rounded border border-cyan/30 bg-navy px-3 py-2 text-offwhite outline-none focus:border-cyan"
+          >
+            {Object.entries(COUNCIL_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <label className="flex flex-col gap-1 text-sm">
         PDF file
         <input

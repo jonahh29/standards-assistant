@@ -2,6 +2,7 @@ import { getSupabaseServerClient } from "@/lib/supabase-server";
 import { UploadForm } from "./UploadForm";
 import { FiguresProgress } from "./FiguresProgress";
 import { DocumentActions } from "./DocumentActions";
+import { instrumentDisplayLabel, type Council, type Instrument } from "@/lib/instruments";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,7 @@ export default async function UploadPage() {
   const { data: documents } = await supabase
     .from("documents")
     .select(
-      "id, title, filename, status, error_message, created_at, figures_status, figures_done, figures_total, product"
+      "id, title, filename, status, error_message, created_at, figures_status, figures_done, figures_total, product, instrument, council"
     )
     .order("created_at", { ascending: false });
 
@@ -34,6 +35,12 @@ export default async function UploadPage() {
                   <DocumentActions documentId={doc.id} title={doc.title} />
                   <span className="font-mono text-xs text-offwhite/40">
                     {doc.product === "commercial" ? "Commercial" : "Residential"}
+                  </span>
+                  <span className="font-mono text-xs text-cyan/60">
+                    {instrumentDisplayLabel(
+                      doc.instrument as Instrument,
+                      doc.council as Council | null
+                    )}
                   </span>
                 </div>
                 <div className="flex items-center gap-3">

@@ -4,6 +4,7 @@ import { chunkDocument } from "@/lib/chunk";
 import { embedTexts } from "@/lib/voyage";
 import { detectPageLabels, extractRasterImages, ensurePdfjsModule } from "@/lib/figures";
 import { getSessionUser, isAdmin } from "@/lib/supabase-session";
+import { isInstrument, isCouncil } from "@/lib/instruments";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Admin access required." }, { status: 403 });
   }
 
-  const { title, filename, storagePath, product } = await request.json();
+  const { title, filename, storagePath, product, instrument, council } = await request.json();
 
   if (!title || !filename || !storagePath) {
     return Response.json(
@@ -26,6 +27,27 @@ export async function POST(request: Request) {
   if (product !== "residential" && product !== "commercial") {
     return Response.json(
       { error: "product must be 'residential' or 'commercial'." },
+      { status: 400 }
+    );
+  }
+  if (!isInstrument(instrument)) {
+    return Response.json(
+      { error: "instrument must be one of: ncc, qdc, qld_housing_code, council_scheme." },
+      { status: 400 }
+    );
+  }
+  // Mirrors the database's own council_matches_instrument check constraint
+  // (Step 1) — checked here too so a bad combination fails with a clear message
+  // instead of a raw Postgres constraint-violation error surfacing in the UI.
+  if (instrument === "council_scheme" && !isCouncil(council)) {
+    return Response.json(
+      { error: "council is required (brisbane, gold_coast, or sunshine_coast) when instrument is council_scheme." },
+      { status: 400 }
+    );
+  }
+  if (instrument !== "council_scheme" && council) {
+    return Response.json(
+      { error: "council must be omitted unless instrument is council_scheme." },
       { status: 400 }
     );
   }
@@ -40,6 +62,8 @@ export async function POST(request: Request) {
       storage_path: storagePath,
       status: "processing",
       product,
+      instrument,
+      council: instrument === "council_scheme" ? council : null,
     })
     .select()
     .single();
